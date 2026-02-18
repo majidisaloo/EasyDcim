@@ -44,12 +44,15 @@ final class AdminController
         if ($action === 'add_package') {
             $this->addPackage();
         }
+        if ($action === 'save_override') {
+            $this->saveOverride();
+        }
 
         $version = Version::current($this->moduleDir);
-        $updateAvailable = Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'update_available')->value('meta_value') === '1';
-        $lastPollAt = (string) Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
-        $apiFailCount = (int) Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
-        $updateLock = Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
+        $updateAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_available')->value('meta_value') === '1';
+        $lastPollAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
+        $apiFailCount = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
+        $updateLock = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
 
         echo '<link rel="stylesheet" href="../modules/addons/easydcim_bandwidth_guard/assets/admin.css">';
         echo '<div class="edbw-wrap">';
@@ -83,7 +86,7 @@ final class AdminController
         echo '<input type="number" step="0.01" min="0" name="pkg_price" placeholder="Price" required>';
         echo '<button class="btn btn-default" type="submit">Add Package</button>';
         echo '</form>';
-        $packages = Capsule::table('mod_easydcim_bw_packages')->orderBy('id')->limit(100)->get();
+        $packages = Capsule::table('mod_easydcim_bw_guard_packages')->orderBy('id')->limit(100)->get();
         echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th></tr></thead><tbody>';
         foreach ($packages as $pkg) {
             echo '<tr>';
@@ -92,6 +95,29 @@ final class AdminController
             echo '<td>' . htmlspecialchars((string) $pkg->size_gb) . '</td>';
             echo '<td>' . htmlspecialchars((string) $pkg->price) . '</td>';
             echo '<td>' . ((int) $pkg->is_active === 1 ? 'Yes' : 'No') . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+
+        echo '<h3>Service Overrides (Permanent)</h3>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="action" value="save_override">';
+        echo '<input type="number" min="1" name="ov_serviceid" placeholder="WHMCS Service ID" required>';
+        echo '<input type="number" step="0.01" min="0" name="ov_quota_gb" placeholder="Base Quota GB">';
+        echo '<select name="ov_mode"><option value=\"\">Mode</option><option value=\"IN\">IN</option><option value=\"OUT\">OUT</option><option value=\"TOTAL\">TOTAL</option></select>';
+        echo '<select name="ov_action"><option value=\"\">Action</option><option value=\"disable_ports\">Disable Ports</option><option value=\"suspend\">Suspend</option><option value=\"both\">Both</option></select>';
+        echo '<button class="btn btn-default" type="submit">Save Override</button>';
+        echo '</form>';
+
+        $overrides = Capsule::table('mod_easydcim_bw_guard_service_overrides')->orderByDesc('id')->limit(200)->get();
+        echo '<table class="table table-striped"><thead><tr><th>Service</th><th>Quota GB</th><th>Mode</th><th>Action</th><th>Updated</th></tr></thead><tbody>';
+        foreach ($overrides as $ov) {
+            echo '<tr>';
+            echo '<td>' . (int) $ov->serviceid . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->override_base_quota_gb) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->override_mode) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->override_action) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->updated_at) . '</td>';
             echo '</tr>';
         }
         echo '</tbody></table>';
@@ -141,7 +167,7 @@ final class AdminController
 
     private function getPurchaseLogs(): array
     {
-        return Capsule::table('mod_easydcim_bw_purchases')
+        return Capsule::table('mod_easydcim_bw_guard_purchases')
             ->orderByDesc('id')
             ->limit(200)
             ->get()
@@ -151,7 +177,7 @@ final class AdminController
 
     private function getEnforcementLogs(): array
     {
-        return Capsule::table('mod_easydcim_bw_logs')
+        return Capsule::table('mod_easydcim_bw_guard_logs')
             ->whereIn('message', ['traffic_enforced', 'traffic_unlocked', 'service_poll_failed'])
             ->orderByDesc('id')
             ->limit(200)
@@ -176,7 +202,7 @@ final class AdminController
             return;
         }
 
-        Capsule::table('mod_easydcim_bw_packages')->insert([
+        Capsule::table('mod_easydcim_bw_guard_packages')->insert([
             'name' => $name,
             'size_gb' => $size,
             'price' => $price,
@@ -188,5 +214,38 @@ final class AdminController
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
         echo '<div class="alert alert-success">Package added.</div>';
+    }
+
+    private function saveOverride(): void
+    {
+        $serviceId = (int) ($_POST['ov_serviceid'] ?? 0);
+        $quota = ($_POST['ov_quota_gb'] ?? '') !== '' ? (float) $_POST['ov_quota_gb'] : null;
+        $mode = strtoupper(trim((string) ($_POST['ov_mode'] ?? '')));
+        $action = trim((string) ($_POST['ov_action'] ?? ''));
+
+        if ($serviceId <= 0) {
+            echo '<div class="alert alert-danger">Invalid service id.</div>';
+            return;
+        }
+        if ($mode !== '' && !in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
+            echo '<div class="alert alert-danger">Invalid mode.</div>';
+            return;
+        }
+        if ($action !== '' && !in_array($action, ['disable_ports', 'suspend', 'both'], true)) {
+            echo '<div class="alert alert-danger">Invalid action.</div>';
+            return;
+        }
+
+        Capsule::table('mod_easydcim_bw_guard_service_overrides')->updateOrInsert(
+            ['serviceid' => $serviceId],
+            [
+                'override_base_quota_gb' => $quota,
+                'override_mode' => $mode !== '' ? $mode : null,
+                'override_action' => $action !== '' ? $action : null,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'created_at' => date('Y-m-d H:i:s'),
+            ]
+        );
+        echo '<div class="alert alert-success">Override saved.</div>';
     }
 }

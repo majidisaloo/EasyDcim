@@ -24,7 +24,7 @@ final class Module
             'name' => 'EasyDCIM Bandwidth Guard',
             'description' => 'Cycle-aware traffic control with EasyDCIM API, one-click git updates, and production-safe migrations.',
             'version' => $version['module_version'],
-            'author' => 'Codex',
+            'author' => 'Majid Isaloo',
             'fields' => [
                 'easydcim_base_url' => ['FriendlyName' => 'EasyDCIM Base URL', 'Type' => 'text', 'Size' => '80', 'Default' => ''],
                 'easydcim_api_token' => ['FriendlyName' => 'Admin API Token', 'Type' => 'password', 'Size' => '80', 'Default' => ''],
@@ -55,7 +55,7 @@ final class Module
             $migrator = new Migrator($logger);
             $migrator->migrate();
 
-            Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
                 ['meta_key' => 'activated_at'],
                 ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
             );

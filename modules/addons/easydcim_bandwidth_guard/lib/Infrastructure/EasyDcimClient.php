@@ -35,6 +35,25 @@ final class EasyDcimClient
         return $this->request('GET', '/api/v3/client/services/' . rawurlencode($serviceId) . '/ports' . $query, null, $impersonateUser);
     }
 
+    public function portsByServer(string $serverId, bool $withTraffic = false, ?string $impersonateUser = null): array
+    {
+        $query = $withTraffic ? '?with_traffic=true' : '';
+        $candidates = [
+            '/api/v3/client/items/' . rawurlencode($serverId) . '/ports' . $query,
+            '/api/v3/client/servers/' . rawurlencode($serverId) . '/ports' . $query,
+        ];
+
+        foreach ($candidates as $path) {
+            $response = $this->request('GET', $path, null, $impersonateUser, false);
+            $code = (int) ($response['http_code'] ?? 0);
+            if ($code >= 200 && $code < 300) {
+                return $response;
+            }
+        }
+
+        return ['http_code' => 404, 'data' => [], 'raw' => null, 'error' => 'No server port endpoint matched'];
+    }
+
     public function disablePort(string $portId): array
     {
         return $this->request('POST', '/api/v3/admin/ports/' . rawurlencode($portId) . '/disable');

@@ -6,9 +6,10 @@ Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git u
 
 - Cycle-aware traffic calculation from `nextduedate` and billing cycle.
 - EasyDCIM API integration for bandwidth, ports, suspend/unsuspend, and graph export.
+- Port enforcement resolves port IDs by service, with fallback by `easydcim_server_id`.
 - Commit-based version string: `1.0.<commit_time>+<short_sha>`.
 - Auto update check (`git ls-remote`) + one-click admin update (`git pull --ff-only`).
-- Strict additive/idempotent migrations only on `mod_easydcim_bw_*` tables.
+- Strict additive/idempotent migrations only on `mod_easydcim_bw_guard_*` tables.
 - Purchase logs include invoice, cycle window, reset date, actor, and timestamp.
 - Admin package management and client one-time per-cycle purchase flow.
 - Auto-buy from client credit with max-purchases-per-cycle guard.
@@ -23,8 +24,9 @@ Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git u
 
 ## Database Safety
 
-- No changes to `tblhosting`, `tblinvoices`, or other WHMCS core tables.
+- No schema changes to `tblhosting`, `tblinvoices`, or other WHMCS core tables.
 - Migrations are idempotent and additive (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS` behavior).
+- Dedicated table prefix (`mod_easydcim_bw_guard_*`) avoids conflicts with older `easydcim_bw` addons.
 
 ## Cron Behavior
 

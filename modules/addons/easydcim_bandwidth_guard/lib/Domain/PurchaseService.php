@@ -18,7 +18,7 @@ final class PurchaseService
 
     public function recordPurchase(array $payload): int
     {
-        $id = (int) Capsule::table('mod_easydcim_bw_purchases')->insertGetId([
+        $id = (int) Capsule::table('mod_easydcim_bw_guard_purchases')->insertGetId([
             'whmcs_serviceid' => (int) $payload['whmcs_serviceid'],
             'userid' => (int) $payload['userid'],
             'package_id' => (int) $payload['package_id'],

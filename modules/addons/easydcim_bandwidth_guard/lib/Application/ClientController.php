@@ -26,7 +26,7 @@ final class ClientController
 
     public function buildTemplateVars(int $userId): array
     {
-        $service = Capsule::table('mod_easydcim_bw_service_state')
+        $service = Capsule::table('mod_easydcim_bw_guard_service_state')
             ->where('userid', $userId)
             ->orderByDesc('id')
             ->first();
@@ -66,14 +66,14 @@ final class ClientController
             $flash = $this->handleBuyPackage($userId, (int) $service->serviceid, $window, (int) $_POST['buy_package_id']);
         }
 
-        $packages = Capsule::table('mod_easydcim_bw_packages')
+        $packages = Capsule::table('mod_easydcim_bw_guard_packages')
             ->where('is_active', 1)
             ->orderBy('size_gb')
             ->get()
             ->map(static fn ($r): array => (array) $r)
             ->all();
 
-        $purchases = Capsule::table('mod_easydcim_bw_purchases')
+        $purchases = Capsule::table('mod_easydcim_bw_guard_purchases')
             ->where('whmcs_serviceid', $service->serviceid)
             ->where('cycle_start', $window['start'])
             ->where('cycle_end', $window['end'])
@@ -102,7 +102,7 @@ final class ClientController
 
     private function handleBuyPackage(int $userId, int $serviceId, array $window, int $packageId): string
     {
-        $package = Capsule::table('mod_easydcim_bw_packages')->where('id', $packageId)->where('is_active', 1)->first();
+        $package = Capsule::table('mod_easydcim_bw_guard_packages')->where('id', $packageId)->where('is_active', 1)->first();
         if (!$package) {
             return 'Selected package is not available.';
         }

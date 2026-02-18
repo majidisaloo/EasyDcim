@@ -11,7 +11,7 @@ final class Logger
     public function log(string $level, string $message, array $context = []): void
     {
         try {
-            Capsule::table('mod_easydcim_bw_logs')->insert([
+            Capsule::table('mod_easydcim_bw_guard_logs')->insert([
                 'level' => strtoupper($level),
                 'message' => $message,
                 'context_json' => json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),

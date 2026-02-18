@@ -29,6 +29,7 @@ final class Migrator
             $this->createMeta();
             $this->createUpdateLog();
             $this->createPackages();
+            $this->createServiceOverrides();
             $this->addMissingColumns();
             $this->addIndexes();
         });
@@ -36,11 +37,11 @@ final class Migrator
 
     private function createProductDefaults(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_product_defaults')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_product_defaults')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_product_defaults', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_product_defaults', static function (Blueprint $table): void {
             $table->increments('id');
             $table->integer('pid')->default(0);
             $table->decimal('default_quota_gb', 12, 2)->default(0);
@@ -53,11 +54,11 @@ final class Migrator
 
     private function createServiceState(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_service_state')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_service_state')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_service_state', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_service_state', static function (Blueprint $table): void {
             $table->increments('id');
             $table->integer('serviceid')->unsigned();
             $table->integer('userid')->unsigned();
@@ -79,11 +80,11 @@ final class Migrator
 
     private function createPurchases(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_purchases')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_purchases')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_purchases', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_purchases', static function (Blueprint $table): void {
             $table->bigIncrements('id');
             $table->integer('whmcs_serviceid')->unsigned();
             $table->integer('userid')->unsigned();
@@ -105,11 +106,11 @@ final class Migrator
 
     private function createGraphCache(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_graph_cache')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_graph_cache')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_graph_cache', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_graph_cache', static function (Blueprint $table): void {
             $table->bigIncrements('id');
             $table->integer('whmcs_serviceid')->unsigned();
             $table->dateTime('range_start');
@@ -122,11 +123,11 @@ final class Migrator
 
     private function createLogs(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_logs')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_logs')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_logs', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_logs', static function (Blueprint $table): void {
             $table->bigIncrements('id');
             $table->string('level', 16);
             $table->string('message', 255);
@@ -138,11 +139,11 @@ final class Migrator
 
     private function createMeta(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_meta')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_meta')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_meta', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_meta', static function (Blueprint $table): void {
             $table->string('meta_key', 64)->primary();
             $table->text('meta_value')->nullable();
             $table->dateTime('updated_at');
@@ -151,11 +152,11 @@ final class Migrator
 
     private function createUpdateLog(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_update_log')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_update_log')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_update_log', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_update_log', static function (Blueprint $table): void {
             $table->bigIncrements('id');
             $table->string('current_sha', 64)->nullable();
             $table->string('remote_sha', 64)->nullable();
@@ -169,11 +170,11 @@ final class Migrator
 
     private function createPackages(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_packages')) {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_packages')) {
             return;
         }
 
-        Capsule::schema()->create('mod_easydcim_bw_packages', static function (Blueprint $table): void {
+        Capsule::schema()->create('mod_easydcim_bw_guard_packages', static function (Blueprint $table): void {
             $table->increments('id');
             $table->string('name', 120);
             $table->decimal('size_gb', 12, 2);
@@ -187,16 +188,33 @@ final class Migrator
         });
     }
 
+    private function createServiceOverrides(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_service_overrides')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_guard_service_overrides', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->integer('serviceid')->unsigned()->unique();
+            $table->decimal('override_base_quota_gb', 12, 2)->nullable();
+            $table->string('override_mode', 10)->nullable();
+            $table->string('override_action', 20)->nullable();
+            $table->dateTime('created_at')->nullable();
+            $table->dateTime('updated_at')->nullable();
+        });
+    }
+
     private function addMissingColumns(): void
     {
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_service_state')) {
-            $this->addColumnIfMissing('mod_easydcim_bw_service_state', 'lock_version', static function (Blueprint $table): void {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_service_state')) {
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_service_state', 'lock_version', static function (Blueprint $table): void {
                 $table->unsignedInteger('lock_version')->default(0);
             });
         }
 
-        if (Capsule::schema()->hasTable('mod_easydcim_bw_logs')) {
-            $this->addColumnIfMissing('mod_easydcim_bw_logs', 'source', static function (Blueprint $table): void {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_logs')) {
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_logs', 'source', static function (Blueprint $table): void {
                 $table->string('source', 40)->nullable();
             });
         }
@@ -214,10 +232,11 @@ final class Migrator
 
     private function addIndexes(): void
     {
-        $this->ensureIndex('mod_easydcim_bw_service_state', 'idx_mod_edbw_service_cycle', ['serviceid', 'cycle_start', 'cycle_end']);
-        $this->ensureIndex('mod_easydcim_bw_purchases', 'idx_mod_edbw_purchases_cycle', ['whmcs_serviceid', 'cycle_start', 'cycle_end', 'created_at']);
-        $this->ensureIndex('mod_easydcim_bw_graph_cache', 'idx_mod_edbw_graph_lookup', ['whmcs_serviceid', 'range_start', 'range_end', 'payload_hash']);
-        $this->ensureIndex('mod_easydcim_bw_logs', 'idx_mod_edbw_logs_level_created', ['level', 'created_at']);
+        $this->ensureIndex('mod_easydcim_bw_guard_service_state', 'idx_mod_edbw_service_cycle', ['serviceid', 'cycle_start', 'cycle_end']);
+        $this->ensureIndex('mod_easydcim_bw_guard_purchases', 'idx_mod_edbw_purchases_cycle', ['whmcs_serviceid', 'cycle_start', 'cycle_end', 'created_at']);
+        $this->ensureIndex('mod_easydcim_bw_guard_graph_cache', 'idx_mod_edbw_graph_lookup', ['whmcs_serviceid', 'range_start', 'range_end', 'payload_hash']);
+        $this->ensureIndex('mod_easydcim_bw_guard_logs', 'idx_mod_edbw_logs_level_created', ['level', 'created_at']);
+        $this->ensureIndex('mod_easydcim_bw_guard_service_overrides', 'idx_mod_edbw_override_service', ['serviceid']);
     }
 
     private function ensureIndex(string $table, string $indexName, array $columns): void

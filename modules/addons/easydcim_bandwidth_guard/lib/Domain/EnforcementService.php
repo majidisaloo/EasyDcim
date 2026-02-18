@@ -18,11 +18,10 @@ final class EnforcementService
         $this->logger = $logger;
     }
 
-    public function enforce(string $action, string $serviceId, ?string $orderId, ?string $impersonateUser = null): void
+    public function enforce(string $action, string $serviceId, ?string $orderId, ?string $impersonateUser = null, ?string $serverId = null): void
     {
         if (in_array($action, ['disable_ports', 'both'], true)) {
-            $ports = $this->client->ports($serviceId, false, $impersonateUser);
-            foreach (($ports['data']['data'] ?? $ports['data'] ?? []) as $port) {
+            foreach ($this->resolvePorts($serviceId, $impersonateUser, $serverId) as $port) {
                 if (!empty($port['id'])) {
                     $this->client->disablePort((string) $port['id']);
                 }
@@ -40,11 +39,10 @@ final class EnforcementService
         ]);
     }
 
-    public function unlock(string $action, string $serviceId, ?string $orderId, ?string $impersonateUser = null): void
+    public function unlock(string $action, string $serviceId, ?string $orderId, ?string $impersonateUser = null, ?string $serverId = null): void
     {
         if (in_array($action, ['disable_ports', 'both'], true)) {
-            $ports = $this->client->ports($serviceId, false, $impersonateUser);
-            foreach (($ports['data']['data'] ?? $ports['data'] ?? []) as $port) {
+            foreach ($this->resolvePorts($serviceId, $impersonateUser, $serverId) as $port) {
                 if (!empty($port['id'])) {
                     $this->client->enablePort((string) $port['id']);
                 }
@@ -60,5 +58,22 @@ final class EnforcementService
             'order_id' => $orderId,
             'action' => $action,
         ]);
+    }
+
+    private function resolvePorts(string $serviceId, ?string $impersonateUser = null, ?string $serverId = null): array
+    {
+        $ports = $this->client->ports($serviceId, false, $impersonateUser);
+        $list = $ports['data']['data'] ?? $ports['data'] ?? [];
+        if (!empty($list)) {
+            return is_array($list) ? $list : [];
+        }
+
+        if (!$serverId) {
+            return [];
+        }
+
+        $fallback = $this->client->portsByServer($serverId, false, $impersonateUser);
+        $fallbackList = $fallback['data']['data'] ?? $fallback['data'] ?? [];
+        return is_array($fallbackList) ? $fallbackList : [];
     }
 }

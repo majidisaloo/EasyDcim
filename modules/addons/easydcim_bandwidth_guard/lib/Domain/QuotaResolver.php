@@ -8,16 +8,23 @@ use WHMCS\Database\Capsule;
 
 final class QuotaResolver
 {
-    public function resolve(int $serviceId, int $pid, string $cycleStart, string $cycleEnd): array
+    public function resolve(int $serviceId, int $pid, string $cycleStart, string $cycleEnd, array $customFields = []): array
     {
-        $serviceOverride = Capsule::table('mod_easydcim_bw_service_state')->where('serviceid', $serviceId)->first();
-        $productDefault = Capsule::table('mod_easydcim_bw_product_defaults')->where('pid', $pid)->where('enabled', 1)->first();
+        $serviceOverride = Capsule::table('mod_easydcim_bw_guard_service_overrides')->where('serviceid', $serviceId)->first();
+        $productDefault = Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('pid', $pid)->where('enabled', 1)->first();
 
-        $baseQuota = (float) ($serviceOverride->base_quota_gb ?? $productDefault->default_quota_gb ?? 0);
-        $mode = (string) ($serviceOverride->mode ?? $productDefault->default_mode ?? 'TOTAL');
-        $action = (string) ($serviceOverride->action ?? $productDefault->default_action ?? 'disable_ports');
+        $fieldQuota = isset($customFields['base_quota_override_gb']) && $customFields['base_quota_override_gb'] !== ''
+            ? (float) $customFields['base_quota_override_gb']
+            : null;
+        $fieldMode = isset($customFields['traffic_mode']) && $customFields['traffic_mode'] !== ''
+            ? strtoupper((string) $customFields['traffic_mode'])
+            : null;
 
-        $extra = (float) Capsule::table('mod_easydcim_bw_purchases')
+        $baseQuota = (float) ($fieldQuota ?? $serviceOverride->override_base_quota_gb ?? $productDefault->default_quota_gb ?? 0);
+        $mode = (string) ($fieldMode ?? $serviceOverride->override_mode ?? $productDefault->default_mode ?? 'TOTAL');
+        $action = (string) ($serviceOverride->override_action ?? $productDefault->default_action ?? 'disable_ports');
+
+        $extra = (float) Capsule::table('mod_easydcim_bw_guard_purchases')
             ->where('whmcs_serviceid', $serviceId)
             ->where('cycle_start', $cycleStart)
             ->where('cycle_end', $cycleEnd)

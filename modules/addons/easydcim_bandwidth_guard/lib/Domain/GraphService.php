@@ -33,7 +33,7 @@ final class GraphService
         ];
         $hash = hash('sha256', json_encode($payload));
 
-        $cacheRow = Capsule::table('mod_easydcim_bw_graph_cache')
+        $cacheRow = Capsule::table('mod_easydcim_bw_guard_graph_cache')
             ->where('whmcs_serviceid', $whmcsServiceId)
             ->where('payload_hash', $hash)
             ->orderByDesc('cached_at')
@@ -46,7 +46,7 @@ final class GraphService
         $response = $this->client->graphExport($targetServiceId, $payload, $impersonateUser);
         $data = $response['data'] ?? [];
 
-        Capsule::table('mod_easydcim_bw_graph_cache')->insert([
+        Capsule::table('mod_easydcim_bw_guard_graph_cache')->insert([
             'whmcs_serviceid' => $whmcsServiceId,
             'range_start' => $start,
             'range_end' => $end,

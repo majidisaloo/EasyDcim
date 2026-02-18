@@ -64,7 +64,7 @@ final class CronRunner
             return;
         }
 
-        $lastCheck = Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'last_update_check_at')->value('meta_value');
+        $lastCheck = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_update_check_at')->value('meta_value');
         $interval = max(5, $this->settings->getInt('update_check_interval_minutes', 30));
         if ($lastCheck && strtotime((string) $lastCheck) > time() - ($interval * 60)) {
             return;
@@ -78,12 +78,15 @@ final class CronRunner
         }
 
         try {
-            $manager->checkForUpdate($origin, $branch);
+            $result = $manager->checkForUpdate($origin, $branch);
+            if (($result['available'] ?? false) && $this->settings->getString('update_mode', 'check_oneclick') === 'auto') {
+                $manager->applyOneClickUpdate($origin, $branch);
+            }
         } catch (\Throwable $e) {
             $this->logger->log('ERROR', 'update_check_failed', ['error' => $e->getMessage()]);
         }
 
-        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => 'last_update_check_at'],
             ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
         );
@@ -104,7 +107,14 @@ final class CronRunner
 
         try {
             $cycle = $cycleCalc->calculate($service['nextduedate'], $service['billingcycle']);
-            $resolved = $quotaResolver->resolve((int) $service['id'], (int) $service['packageid'], $cycle['start'], $cycle['end']);
+            $this->syncPendingPurchases((int) $service['id'], $cycle['start'], $cycle['end']);
+            $resolved = $quotaResolver->resolve(
+                (int) $service['id'],
+                (int) $service['packageid'],
+                $cycle['start'],
+                $cycle['end'],
+                $service['custom_fields']
+            );
 
             $impersonate = $this->settings->getBool('use_impersonation', false)
                 ? ($service['email'] ?? null)
@@ -112,20 +122,40 @@ final class CronRunner
 
             $usage = $client->bandwidth($service['easydcim_service_id'], $cycle['start'], $cycle['end'], $impersonate);
             $usedGb = $this->extractUsedGb($usage['data'] ?? [], $resolved['mode']);
-            $remaining = max(0, (float) $resolved['allowed_gb'] - $usedGb);
-            $remaining = $this->maybeAutoBuy($service, $cycle, $resolved, $remaining, $purchaseService);
+            $allowedGb = (float) $resolved['allowed_gb'];
+            $remaining = max(0, $allowedGb - $usedGb);
+            $addedByAutoBuy = $this->maybeAutoBuy($service, $cycle, $remaining, $purchaseService);
+            if ($addedByAutoBuy > 0) {
+                $allowedGb += $addedByAutoBuy;
+                $remaining = max(0, $allowedGb - $usedGb);
+            }
 
-            if ($usedGb >= (float) $resolved['allowed_gb']) {
-                $enforcement->enforce($resolved['action'], $service['easydcim_service_id'], $service['easydcim_order_id'], $impersonate);
+            $previous = Capsule::table('mod_easydcim_bw_guard_service_state')->where('serviceid', (int) $service['id'])->first();
+            $wasLimited = ((string) ($previous->last_status ?? '')) === 'limited';
+
+            if ($usedGb >= $allowedGb) {
+                $enforcement->enforce(
+                    $resolved['action'],
+                    $service['easydcim_service_id'],
+                    $service['easydcim_order_id'],
+                    $impersonate,
+                    $service['easydcim_server_id'] !== '' ? $service['easydcim_server_id'] : null
+                );
                 $status = 'limited';
             } else {
-                if (($service['domainstatus'] ?? '') === 'Suspended') {
-                    $enforcement->unlock($resolved['action'], $service['easydcim_service_id'], $service['easydcim_order_id'], $impersonate);
+                if (($service['domainstatus'] ?? '') === 'Suspended' || $wasLimited) {
+                    $enforcement->unlock(
+                        $resolved['action'],
+                        $service['easydcim_service_id'],
+                        $service['easydcim_order_id'],
+                        $impersonate,
+                        $service['easydcim_server_id'] !== '' ? $service['easydcim_server_id'] : null
+                    );
                 }
                 $status = 'ok';
             }
 
-            Capsule::table('mod_easydcim_bw_service_state')->updateOrInsert(
+            Capsule::table('mod_easydcim_bw_guard_service_state')->updateOrInsert(
                 ['serviceid' => (int) $service['id']],
                 [
                     'userid' => (int) $service['userid'],
@@ -222,6 +252,8 @@ final class CronRunner
                 'email' => (string) ($row->email ?? ''),
                 'easydcim_service_id' => (string) $map['easydcim_service_id'],
                 'easydcim_order_id' => (string) ($map['easydcim_order_id'] ?? ''),
+                'easydcim_server_id' => (string) ($map['easydcim_server_id'] ?? ''),
+                'custom_fields' => $map,
             ];
         }
 
@@ -241,7 +273,7 @@ final class CronRunner
         foreach ($rows as $row) {
             $name = strtolower(trim((string) $row->fieldname));
             $cleanName = explode('|', $name)[0];
-            if (in_array($cleanName, ['easydcim_service_id', 'easydcim_order_id', 'traffic_mode', 'base_quota_override_gb'], true)) {
+            if (in_array($cleanName, ['easydcim_service_id', 'easydcim_order_id', 'easydcim_server_id', 'traffic_mode', 'base_quota_override_gb'], true)) {
                 $data[$cleanName] = (string) $row->value;
             }
         }
@@ -249,46 +281,46 @@ final class CronRunner
         return $data;
     }
 
-    private function maybeAutoBuy(array $service, array $cycle, array $resolved, float $remaining, PurchaseService $purchaseService): float
+    private function maybeAutoBuy(array $service, array $cycle, float $remaining, PurchaseService $purchaseService): float
     {
         if (!$this->settings->getBool('autobuy_enabled', false)) {
-            return $remaining;
+            return 0.0;
         }
 
         $threshold = (float) $this->settings->getInt('autobuy_threshold_gb', 10);
         if ($remaining > $threshold) {
-            return $remaining;
+            return 0.0;
         }
 
         $packageId = $this->settings->getInt('autobuy_default_package_id', 0);
         if ($packageId <= 0) {
-            return $remaining;
+            return 0.0;
         }
 
-        $package = Capsule::table('mod_easydcim_bw_packages')->where('id', $packageId)->where('is_active', 1)->first();
+        $package = Capsule::table('mod_easydcim_bw_guard_packages')->where('id', $packageId)->where('is_active', 1)->first();
         if (!$package) {
-            return $remaining;
+            return 0.0;
         }
 
-        $alreadyBought = (int) Capsule::table('mod_easydcim_bw_purchases')
+        $alreadyBought = (int) Capsule::table('mod_easydcim_bw_guard_purchases')
             ->where('whmcs_serviceid', (int) $service['id'])
             ->where('cycle_start', $cycle['start'])
             ->where('cycle_end', $cycle['end'])
             ->where('actor', 'autobuy_cron')
             ->count();
         if ($alreadyBought >= max(1, $this->settings->getInt('autobuy_max_per_cycle', 5))) {
-            return $remaining;
+            return 0.0;
         }
 
         $credit = (float) Capsule::table('tblclients')->where('id', (int) $service['userid'])->value('credit');
         if ($credit < (float) $package->price) {
             $this->logger->log('WARNING', 'autobuy_skipped_no_credit', ['serviceid' => $service['id'], 'credit' => $credit]);
-            return $remaining;
+            return 0.0;
         }
 
         $invoiceId = $this->createAndPayInvoice((int) $service['userid'], (int) $service['id'], (float) $package->price, (float) $package->size_gb);
         if ($invoiceId <= 0) {
-            return $remaining;
+            return 0.0;
         }
 
         $purchaseService->recordPurchase([
@@ -323,7 +355,7 @@ final class CronRunner
             ],
         ]);
 
-        return $remaining + (float) $package->size_gb;
+        return (float) $package->size_gb;
     }
 
     private function createAndPayInvoice(int $userId, int $serviceId, float $price, float $sizeGb): int
@@ -356,17 +388,40 @@ final class CronRunner
         ]);
 
         if (($pay['result'] ?? '') !== 'success') {
-            $this->logger->log('ERROR', 'autobuy_invoice_pay_failed', ['invoiceid' => $invoiceId, 'response' => $pay]);
-            return 0;
+            $apply = localAPI('ApplyCredit', ['invoiceid' => $invoiceId, 'amount' => $price]);
+            if (($apply['result'] ?? '') !== 'success') {
+                $this->logger->log('ERROR', 'autobuy_invoice_pay_failed', ['invoiceid' => $invoiceId, 'response' => $pay, 'apply_credit' => $apply]);
+                return 0;
+            }
         }
 
         return $invoiceId;
     }
 
+    private function syncPendingPurchases(int $serviceId, string $cycleStart, string $cycleEnd): void
+    {
+        $pending = Capsule::table('mod_easydcim_bw_guard_purchases')
+            ->where('whmcs_serviceid', $serviceId)
+            ->where('cycle_start', $cycleStart)
+            ->where('cycle_end', $cycleEnd)
+            ->where('payment_status', 'pending')
+            ->whereNotNull('invoiceid')
+            ->get();
+
+        foreach ($pending as $row) {
+            $status = (string) Capsule::table('tblinvoices')->where('id', (int) $row->invoiceid)->value('status');
+            if (strtolower($status) === 'paid') {
+                Capsule::table('mod_easydcim_bw_guard_purchases')
+                    ->where('id', (int) $row->id)
+                    ->update(['payment_status' => 'paid']);
+            }
+        }
+    }
+
     private function apiCircuitOpen(): bool
     {
-        $failedCount = (int) Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
-        $lastFailAt = Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'api_last_fail_at')->value('meta_value');
+        $failedCount = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
+        $lastFailAt = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_last_fail_at')->value('meta_value');
         if ($failedCount < 5) {
             return false;
         }
@@ -376,12 +431,12 @@ final class CronRunner
 
     private function registerApiFailure(): void
     {
-        $count = (int) Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
-        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+        $count = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => 'api_fail_count'],
             ['meta_value' => (string) ($count + 1), 'updated_at' => date('Y-m-d H:i:s')]
         );
-        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => 'api_last_fail_at'],
             ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
         );
@@ -389,7 +444,7 @@ final class CronRunner
 
     private function registerApiSuccess(): void
     {
-        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => 'api_fail_count'],
             ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
         );

@@ -20,8 +20,13 @@ final class GitUpdateManager
 
     public function checkForUpdate(string $originUrl, string $branch): array
     {
+        if ($originUrl === '' || $branch === '') {
+            throw new \RuntimeException('Origin URL and branch are required');
+        }
+
         $local = $this->runGit('rev-parse HEAD');
         $remoteLine = $this->runGit('ls-remote ' . escapeshellarg($originUrl) . ' ' . escapeshellarg($branch));
+        $this->assertGitOutput($remoteLine, 'ls-remote');
 
         $remote = '';
         if ($remoteLine) {
@@ -30,7 +35,7 @@ final class GitUpdateManager
         }
 
         $available = $local !== '' && $remote !== '' && $local !== $remote;
-        Capsule::table('mod_easydcim_bw_update_log')->insert([
+        Capsule::table('mod_easydcim_bw_guard_update_log')->insert([
             'current_sha' => $local ?: null,
             'remote_sha' => $remote ?: null,
             'status' => $available ? 'update_available' : 'up_to_date',
@@ -39,7 +44,7 @@ final class GitUpdateManager
             'created_at' => date('Y-m-d H:i:s'),
         ]);
 
-        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => 'update_available'],
             ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
         );
@@ -49,16 +54,20 @@ final class GitUpdateManager
 
     public function applyOneClickUpdate(string $originUrl, string $branch): array
     {
+        if ($originUrl === '' || $branch === '') {
+            throw new \RuntimeException('Origin URL and branch are required');
+        }
+
         $this->assertPreflight();
         $this->acquireUpdateLock();
 
         try {
-            $this->runGit('remote set-url origin ' . escapeshellarg($originUrl));
+            $this->assertGitOutput($this->runGit('remote set-url origin ' . escapeshellarg($originUrl)), 'remote_set_url');
             $fetch = $this->runGitWithRetry('fetch origin ' . escapeshellarg($branch), 2);
             $pull = $this->runGitWithRetry('pull --ff-only origin ' . escapeshellarg($branch), 2);
             $newSha = $this->runGit('rev-parse HEAD');
 
-            Capsule::table('mod_easydcim_bw_update_log')->insert([
+            Capsule::table('mod_easydcim_bw_guard_update_log')->insert([
                 'current_sha' => $newSha ?: null,
                 'remote_sha' => $newSha ?: null,
                 'status' => 'applied',
@@ -109,22 +118,23 @@ final class GitUpdateManager
         $result = '';
         for ($i = 0; $i <= $retries; $i++) {
             $result = $this->runGit($command);
-            if (stripos($result, 'fatal:') === false && stripos($result, 'error:') === false) {
+            if ($this->looksSuccessful($result)) {
                 return $result;
             }
             usleep(300000);
         }
+        $this->assertGitOutput($result, $command);
         return $result;
     }
 
     private function acquireUpdateLock(): void
     {
-        $locked = Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'update_in_progress')->value('meta_value');
+        $locked = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value');
         if ($locked === '1') {
             throw new \RuntimeException('Update already in progress');
         }
 
-        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => 'update_in_progress'],
             ['meta_value' => '1', 'updated_at' => date('Y-m-d H:i:s')]
         );
@@ -132,9 +142,23 @@ final class GitUpdateManager
 
     private function releaseUpdateLock(): void
     {
-        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => 'update_in_progress'],
             ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
         );
+    }
+
+    private function looksSuccessful(string $output): bool
+    {
+        return stripos($output, 'fatal:') === false && stripos($output, 'error:') === false;
+    }
+
+    private function assertGitOutput(string $output, string $step): void
+    {
+        if ($this->looksSuccessful($output)) {
+            return;
+        }
+
+        throw new \RuntimeException('Git step failed (' . $step . '): ' . $output);
     }
 }

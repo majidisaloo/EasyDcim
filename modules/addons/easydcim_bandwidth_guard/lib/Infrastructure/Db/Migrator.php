@@ -1,0 +1,237 @@
+<?php
+
+declare(strict_types=1);
+
+namespace EasyDcimBandwidthGuard\Infrastructure\Db;
+
+use EasyDcimBandwidthGuard\Support\Logger;
+use WHMCS\Database\Capsule;
+use Illuminate\Database\Schema\Blueprint;
+
+final class Migrator
+{
+    private Logger $logger;
+
+    public function __construct(Logger $logger)
+    {
+        $this->logger = $logger;
+    }
+
+    public function migrate(): void
+    {
+        $conn = Capsule::connection();
+        $conn->transaction(function (): void {
+            $this->createProductDefaults();
+            $this->createServiceState();
+            $this->createPurchases();
+            $this->createGraphCache();
+            $this->createLogs();
+            $this->createMeta();
+            $this->createUpdateLog();
+            $this->createPackages();
+            $this->addMissingColumns();
+            $this->addIndexes();
+        });
+    }
+
+    private function createProductDefaults(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_product_defaults')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_product_defaults', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->integer('pid')->default(0);
+            $table->decimal('default_quota_gb', 12, 2)->default(0);
+            $table->string('default_mode', 10)->default('TOTAL');
+            $table->string('default_action', 20)->default('disable_ports');
+            $table->boolean('enabled')->default(true);
+            $table->timestamps();
+        });
+    }
+
+    private function createServiceState(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_service_state')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_service_state', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->integer('serviceid')->unsigned();
+            $table->integer('userid')->unsigned();
+            $table->string('easydcim_service_id', 64);
+            $table->string('easydcim_order_id', 64)->nullable();
+            $table->dateTime('cycle_start')->nullable();
+            $table->dateTime('cycle_end')->nullable();
+            $table->decimal('base_quota_gb', 12, 2)->default(0);
+            $table->string('mode', 10)->default('TOTAL');
+            $table->string('action', 20)->default('disable_ports');
+            $table->decimal('last_used_gb', 14, 4)->default(0);
+            $table->decimal('last_remaining_gb', 14, 4)->default(0);
+            $table->string('last_status', 20)->default('ok');
+            $table->dateTime('last_check_at')->nullable();
+            $table->dateTime('updated_at')->nullable();
+            $table->dateTime('created_at')->nullable();
+        });
+    }
+
+    private function createPurchases(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_purchases')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_purchases', static function (Blueprint $table): void {
+            $table->bigIncrements('id');
+            $table->integer('whmcs_serviceid')->unsigned();
+            $table->integer('userid')->unsigned();
+            $table->integer('package_id')->unsigned();
+            $table->decimal('size_gb', 12, 2);
+            $table->decimal('price', 12, 2);
+            $table->integer('invoiceid')->unsigned()->nullable();
+            $table->dateTime('cycle_start');
+            $table->dateTime('cycle_end');
+            $table->dateTime('reset_at');
+            $table->string('actor', 20)->default('client_manual');
+            $table->string('payment_status', 20)->default('pending');
+            $table->decimal('remaining_before_gb', 14, 4)->default(0);
+            $table->decimal('remaining_after_gb', 14, 4)->default(0);
+            $table->text('purchase_context_json')->nullable();
+            $table->dateTime('created_at');
+        });
+    }
+
+    private function createGraphCache(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_graph_cache')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_graph_cache', static function (Blueprint $table): void {
+            $table->bigIncrements('id');
+            $table->integer('whmcs_serviceid')->unsigned();
+            $table->dateTime('range_start');
+            $table->dateTime('range_end');
+            $table->string('payload_hash', 64);
+            $table->longText('json_data');
+            $table->dateTime('cached_at');
+        });
+    }
+
+    private function createLogs(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_logs')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_logs', static function (Blueprint $table): void {
+            $table->bigIncrements('id');
+            $table->string('level', 16);
+            $table->string('message', 255);
+            $table->longText('context_json')->nullable();
+            $table->string('correlation_id', 64)->nullable();
+            $table->dateTime('created_at');
+        });
+    }
+
+    private function createMeta(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_meta')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_meta', static function (Blueprint $table): void {
+            $table->string('meta_key', 64)->primary();
+            $table->text('meta_value')->nullable();
+            $table->dateTime('updated_at');
+        });
+    }
+
+    private function createUpdateLog(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_update_log')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_update_log', static function (Blueprint $table): void {
+            $table->bigIncrements('id');
+            $table->string('current_sha', 64)->nullable();
+            $table->string('remote_sha', 64)->nullable();
+            $table->string('status', 32);
+            $table->longText('details_json')->nullable();
+            $table->dateTime('checked_at')->nullable();
+            $table->dateTime('applied_at')->nullable();
+            $table->dateTime('created_at');
+        });
+    }
+
+    private function createPackages(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_packages')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_packages', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('name', 120);
+            $table->decimal('size_gb', 12, 2);
+            $table->decimal('price', 12, 2);
+            $table->boolean('taxed')->default(false);
+            $table->string('available_for_pids', 255)->nullable();
+            $table->string('available_for_gids', 255)->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->dateTime('created_at')->nullable();
+            $table->dateTime('updated_at')->nullable();
+        });
+    }
+
+    private function addMissingColumns(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_service_state')) {
+            $this->addColumnIfMissing('mod_easydcim_bw_service_state', 'lock_version', static function (Blueprint $table): void {
+                $table->unsignedInteger('lock_version')->default(0);
+            });
+        }
+
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_logs')) {
+            $this->addColumnIfMissing('mod_easydcim_bw_logs', 'source', static function (Blueprint $table): void {
+                $table->string('source', 40)->nullable();
+            });
+        }
+    }
+
+    private function addColumnIfMissing(string $table, string $column, callable $callback): void
+    {
+        if (Capsule::schema()->hasColumn($table, $column)) {
+            return;
+        }
+
+        Capsule::schema()->table($table, $callback);
+        $this->logger->log('INFO', 'column_added', ['table' => $table, 'column' => $column]);
+    }
+
+    private function addIndexes(): void
+    {
+        $this->ensureIndex('mod_easydcim_bw_service_state', 'idx_mod_edbw_service_cycle', ['serviceid', 'cycle_start', 'cycle_end']);
+        $this->ensureIndex('mod_easydcim_bw_purchases', 'idx_mod_edbw_purchases_cycle', ['whmcs_serviceid', 'cycle_start', 'cycle_end', 'created_at']);
+        $this->ensureIndex('mod_easydcim_bw_graph_cache', 'idx_mod_edbw_graph_lookup', ['whmcs_serviceid', 'range_start', 'range_end', 'payload_hash']);
+        $this->ensureIndex('mod_easydcim_bw_logs', 'idx_mod_edbw_logs_level_created', ['level', 'created_at']);
+    }
+
+    private function ensureIndex(string $table, string $indexName, array $columns): void
+    {
+        if (!Capsule::schema()->hasTable($table)) {
+            return;
+        }
+
+        try {
+            Capsule::schema()->table($table, static function (Blueprint $blueprint) use ($columns, $indexName): void {
+                $blueprint->index($columns, $indexName);
+            });
+        } catch (\Throwable $e) {
+            // Duplicate index errors are acceptable for idempotent migration behavior.
+        }
+    }
+}

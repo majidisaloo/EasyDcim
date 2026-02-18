@@ -1,0 +1,397 @@
+<?php
+
+declare(strict_types=1);
+
+namespace EasyDcimBandwidthGuard\Application;
+
+use EasyDcimBandwidthGuard\Config\Settings;
+use EasyDcimBandwidthGuard\Domain\CycleCalculator;
+use EasyDcimBandwidthGuard\Domain\EnforcementService;
+use EasyDcimBandwidthGuard\Domain\PurchaseService;
+use EasyDcimBandwidthGuard\Domain\QuotaResolver;
+use EasyDcimBandwidthGuard\Infrastructure\EasyDcimClient;
+use EasyDcimBandwidthGuard\Infrastructure\Git\GitUpdateManager;
+use EasyDcimBandwidthGuard\Infrastructure\Lock\LockManager;
+use EasyDcimBandwidthGuard\Support\Crypto;
+use EasyDcimBandwidthGuard\Support\Logger;
+use WHMCS\Database\Capsule;
+
+final class CronRunner
+{
+    private Settings $settings;
+    private Logger $logger;
+
+    public function __construct(Settings $settings, Logger $logger)
+    {
+        $this->settings = $settings;
+        $this->logger = $logger;
+    }
+
+    public function runPoll(): void
+    {
+        $lock = new LockManager();
+        if (!$lock->acquire('poll', 600)) {
+            return;
+        }
+
+        try {
+            if ($this->apiCircuitOpen()) {
+                $this->logger->log('WARNING', 'poll_skipped_circuit_open');
+                return;
+            }
+
+            $services = $this->loadManagedServices();
+            $client = $this->buildEasyDcimClient();
+            $cycleCalc = new CycleCalculator();
+            $quotaResolver = new QuotaResolver();
+            $enforcement = new EnforcementService($client, $this->logger);
+            $purchaseService = new PurchaseService($this->logger);
+
+            foreach ($services as $service) {
+                $this->processService($service, $cycleCalc, $quotaResolver, $client, $enforcement, $purchaseService);
+            }
+        } catch (\Throwable $e) {
+            $this->registerApiFailure();
+            $this->logger->log('ERROR', 'cron_poll_failed', ['error' => $e->getMessage()]);
+        } finally {
+            $lock->release('poll');
+        }
+    }
+
+    public function runUpdateCheck(string $moduleDir): void
+    {
+        if (!$this->settings->getBool('git_update_enabled', false)) {
+            return;
+        }
+
+        $lastCheck = Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'last_update_check_at')->value('meta_value');
+        $interval = max(5, $this->settings->getInt('update_check_interval_minutes', 30));
+        if ($lastCheck && strtotime((string) $lastCheck) > time() - ($interval * 60)) {
+            return;
+        }
+
+        $manager = new GitUpdateManager($moduleDir, $this->logger);
+        $origin = $this->settings->getString('git_origin_url');
+        $branch = $this->settings->getString('git_branch', 'main');
+        if ($origin === '') {
+            return;
+        }
+
+        try {
+            $manager->checkForUpdate($origin, $branch);
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'update_check_failed', ['error' => $e->getMessage()]);
+        }
+
+        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+            ['meta_key' => 'last_update_check_at'],
+            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+    }
+
+    private function processService(
+        array $service,
+        CycleCalculator $cycleCalc,
+        QuotaResolver $quotaResolver,
+        EasyDcimClient $client,
+        EnforcementService $enforcement,
+        PurchaseService $purchaseService
+    ): void {
+        $serviceLock = new LockManager();
+        if (!$serviceLock->acquire('service:' . $service['id'], 120)) {
+            return;
+        }
+
+        try {
+            $cycle = $cycleCalc->calculate($service['nextduedate'], $service['billingcycle']);
+            $resolved = $quotaResolver->resolve((int) $service['id'], (int) $service['packageid'], $cycle['start'], $cycle['end']);
+
+            $impersonate = $this->settings->getBool('use_impersonation', false)
+                ? ($service['email'] ?? null)
+                : null;
+
+            $usage = $client->bandwidth($service['easydcim_service_id'], $cycle['start'], $cycle['end'], $impersonate);
+            $usedGb = $this->extractUsedGb($usage['data'] ?? [], $resolved['mode']);
+            $remaining = max(0, (float) $resolved['allowed_gb'] - $usedGb);
+            $remaining = $this->maybeAutoBuy($service, $cycle, $resolved, $remaining, $purchaseService);
+
+            if ($usedGb >= (float) $resolved['allowed_gb']) {
+                $enforcement->enforce($resolved['action'], $service['easydcim_service_id'], $service['easydcim_order_id'], $impersonate);
+                $status = 'limited';
+            } else {
+                if (($service['domainstatus'] ?? '') === 'Suspended') {
+                    $enforcement->unlock($resolved['action'], $service['easydcim_service_id'], $service['easydcim_order_id'], $impersonate);
+                }
+                $status = 'ok';
+            }
+
+            Capsule::table('mod_easydcim_bw_service_state')->updateOrInsert(
+                ['serviceid' => (int) $service['id']],
+                [
+                    'userid' => (int) $service['userid'],
+                    'easydcim_service_id' => $service['easydcim_service_id'],
+                    'easydcim_order_id' => $service['easydcim_order_id'],
+                    'cycle_start' => $cycle['start'],
+                    'cycle_end' => $cycle['end'],
+                    'base_quota_gb' => $resolved['base_quota_gb'],
+                    'mode' => $resolved['mode'],
+                    'action' => $resolved['action'],
+                    'last_used_gb' => $usedGb,
+                    'last_remaining_gb' => $remaining,
+                    'last_status' => $status,
+                    'last_check_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                    'created_at' => date('Y-m-d H:i:s'),
+                ]
+            );
+            $this->registerApiSuccess();
+        } catch (\Throwable $e) {
+            $this->registerApiFailure();
+            $this->logger->log('ERROR', 'service_poll_failed', ['serviceid' => $service['id'], 'error' => $e->getMessage()]);
+        } finally {
+            $serviceLock->release('service:' . $service['id']);
+        }
+    }
+
+    private function extractUsedGb(array $payload, string $mode): float
+    {
+        $mode = strtoupper($mode);
+        $in = (float) ($payload['in'] ?? $payload['inbound'] ?? $payload['download'] ?? 0);
+        $out = (float) ($payload['out'] ?? $payload['outbound'] ?? $payload['upload'] ?? 0);
+        $total = (float) ($payload['total'] ?? ($in + $out));
+
+        $bytes = match ($mode) {
+            'IN' => $in,
+            'OUT' => $out,
+            default => $total,
+        };
+
+        return $bytes / 1073741824;
+    }
+
+    private function buildEasyDcimClient(): EasyDcimClient
+    {
+        return new EasyDcimClient(
+            $this->settings->getString('easydcim_base_url'),
+            Crypto::safeDecrypt($this->settings->getString('easydcim_api_token')),
+            $this->settings->getBool('use_impersonation', false),
+            $this->logger
+        );
+    }
+
+    private function loadManagedServices(): array
+    {
+        $pids = array_map('intval', $this->settings->getCsvList('managed_pids'));
+        $gids = array_map('intval', $this->settings->getCsvList('managed_gids'));
+
+        $query = Capsule::table('tblhosting as h')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
+            ->select([
+                'h.id',
+                'h.userid',
+                'h.packageid',
+                'h.billingcycle',
+                'h.nextduedate',
+                'h.domainstatus',
+                'c.email',
+            ])
+            ->whereIn('h.domainstatus', ['Active', 'Suspended']);
+
+        if (!empty($pids)) {
+            $query->whereIn('h.packageid', $pids);
+        } elseif (!empty($gids)) {
+            $query->whereIn('p.gid', $gids);
+        }
+
+        $services = [];
+        foreach ($query->limit(1000)->get() as $row) {
+            $serviceId = (int) $row->id;
+            $map = $this->resolveCustomFieldsForService($serviceId);
+            if (($map['easydcim_service_id'] ?? '') === '') {
+                continue;
+            }
+
+            $services[] = [
+                'id' => $serviceId,
+                'userid' => (int) $row->userid,
+                'packageid' => (int) $row->packageid,
+                'billingcycle' => (string) $row->billingcycle,
+                'nextduedate' => (string) $row->nextduedate,
+                'domainstatus' => (string) $row->domainstatus,
+                'email' => (string) ($row->email ?? ''),
+                'easydcim_service_id' => (string) $map['easydcim_service_id'],
+                'easydcim_order_id' => (string) ($map['easydcim_order_id'] ?? ''),
+            ];
+        }
+
+        return $services;
+    }
+
+    private function resolveCustomFieldsForService(int $hostingId): array
+    {
+        $rows = Capsule::table('tblcustomfieldsvalues as v')
+            ->join('tblcustomfields as f', 'f.id', '=', 'v.fieldid')
+            ->where('f.type', 'product')
+            ->where('v.relid', $hostingId)
+            ->select(['f.fieldname', 'v.value'])
+            ->get();
+
+        $data = [];
+        foreach ($rows as $row) {
+            $name = strtolower(trim((string) $row->fieldname));
+            $cleanName = explode('|', $name)[0];
+            if (in_array($cleanName, ['easydcim_service_id', 'easydcim_order_id', 'traffic_mode', 'base_quota_override_gb'], true)) {
+                $data[$cleanName] = (string) $row->value;
+            }
+        }
+
+        return $data;
+    }
+
+    private function maybeAutoBuy(array $service, array $cycle, array $resolved, float $remaining, PurchaseService $purchaseService): float
+    {
+        if (!$this->settings->getBool('autobuy_enabled', false)) {
+            return $remaining;
+        }
+
+        $threshold = (float) $this->settings->getInt('autobuy_threshold_gb', 10);
+        if ($remaining > $threshold) {
+            return $remaining;
+        }
+
+        $packageId = $this->settings->getInt('autobuy_default_package_id', 0);
+        if ($packageId <= 0) {
+            return $remaining;
+        }
+
+        $package = Capsule::table('mod_easydcim_bw_packages')->where('id', $packageId)->where('is_active', 1)->first();
+        if (!$package) {
+            return $remaining;
+        }
+
+        $alreadyBought = (int) Capsule::table('mod_easydcim_bw_purchases')
+            ->where('whmcs_serviceid', (int) $service['id'])
+            ->where('cycle_start', $cycle['start'])
+            ->where('cycle_end', $cycle['end'])
+            ->where('actor', 'autobuy_cron')
+            ->count();
+        if ($alreadyBought >= max(1, $this->settings->getInt('autobuy_max_per_cycle', 5))) {
+            return $remaining;
+        }
+
+        $credit = (float) Capsule::table('tblclients')->where('id', (int) $service['userid'])->value('credit');
+        if ($credit < (float) $package->price) {
+            $this->logger->log('WARNING', 'autobuy_skipped_no_credit', ['serviceid' => $service['id'], 'credit' => $credit]);
+            return $remaining;
+        }
+
+        $invoiceId = $this->createAndPayInvoice((int) $service['userid'], (int) $service['id'], (float) $package->price, (float) $package->size_gb);
+        if ($invoiceId <= 0) {
+            return $remaining;
+        }
+
+        $purchaseService->recordPurchase([
+            'whmcs_serviceid' => (int) $service['id'],
+            'userid' => (int) $service['userid'],
+            'package_id' => (int) $package->id,
+            'size_gb' => (float) $package->size_gb,
+            'price' => (float) $package->price,
+            'invoice_id' => $invoiceId,
+            'cycle_start' => $cycle['start'],
+            'cycle_end' => $cycle['end'],
+            'reset_at' => $cycle['reset_at'],
+            'actor' => 'autobuy_cron',
+            'payment_status' => 'paid',
+            'remaining_before_gb' => $remaining,
+            'remaining_after_gb' => $remaining + (float) $package->size_gb,
+            'context' => [
+                'whmcs_service_id' => (int) $service['id'],
+                'userid' => (int) $service['userid'],
+                'invoice_id' => $invoiceId,
+                'package_id' => (int) $package->id,
+                'size_gb' => (float) $package->size_gb,
+                'price' => (float) $package->price,
+                'cycle_start' => $cycle['start'],
+                'cycle_end' => $cycle['end'],
+                'reset_at' => $cycle['reset_at'],
+                'purchased_at' => date('Y-m-d H:i:s'),
+                'actor' => 'autobuy_cron',
+                'payment_status' => 'paid',
+                'remaining_before_gb' => $remaining,
+                'remaining_after_gb' => $remaining + (float) $package->size_gb,
+            ],
+        ]);
+
+        return $remaining + (float) $package->size_gb;
+    }
+
+    private function createAndPayInvoice(int $userId, int $serviceId, float $price, float $sizeGb): int
+    {
+        if (!function_exists('localAPI')) {
+            return 0;
+        }
+
+        $description = sprintf('Extra Bandwidth %.2fGB for service #%d', $sizeGb, $serviceId);
+        $create = localAPI('CreateInvoice', [
+            'userid' => $userId,
+            'status' => 'Unpaid',
+            'sendinvoice' => false,
+            'itemdescription1' => $description,
+            'itemamount1' => $price,
+            'itemtaxed1' => 0,
+        ]);
+
+        $invoiceId = (int) ($create['invoiceid'] ?? 0);
+        if (($create['result'] ?? '') !== 'success' || $invoiceId <= 0) {
+            $this->logger->log('ERROR', 'autobuy_invoice_create_failed', ['userid' => $userId, 'response' => $create]);
+            return 0;
+        }
+
+        $pay = localAPI('AddInvoicePayment', [
+            'invoiceid' => $invoiceId,
+            'transid' => 'AUTO-' . time() . '-' . $serviceId,
+            'gateway' => 'credit',
+            'noemail' => true,
+        ]);
+
+        if (($pay['result'] ?? '') !== 'success') {
+            $this->logger->log('ERROR', 'autobuy_invoice_pay_failed', ['invoiceid' => $invoiceId, 'response' => $pay]);
+            return 0;
+        }
+
+        return $invoiceId;
+    }
+
+    private function apiCircuitOpen(): bool
+    {
+        $failedCount = (int) Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
+        $lastFailAt = Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'api_last_fail_at')->value('meta_value');
+        if ($failedCount < 5) {
+            return false;
+        }
+
+        return $lastFailAt && strtotime((string) $lastFailAt) > time() - 900;
+    }
+
+    private function registerApiFailure(): void
+    {
+        $count = (int) Capsule::table('mod_easydcim_bw_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
+        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+            ['meta_key' => 'api_fail_count'],
+            ['meta_value' => (string) ($count + 1), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+            ['meta_key' => 'api_last_fail_at'],
+            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+    }
+
+    private function registerApiSuccess(): void
+    {
+        Capsule::table('mod_easydcim_bw_meta')->updateOrInsert(
+            ['meta_key' => 'api_fail_count'],
+            ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+        );
+    }
+}

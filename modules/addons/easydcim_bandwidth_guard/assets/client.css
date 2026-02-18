@@ -1,0 +1,64 @@
+.edbw-client-wrap {
+  --edbw-bg: linear-gradient(140deg, #f8fbff, #ecf4ff);
+  --edbw-panel: #ffffff;
+  --edbw-border: #dbe7ff;
+  --edbw-title: #0f172a;
+  --edbw-text: #334155;
+  background: var(--edbw-bg);
+  border: 1px solid var(--edbw-border);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.edbw-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.edbw-panel {
+  background: var(--edbw-panel);
+  border: 1px solid var(--edbw-border);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.edbw-panel h3 {
+  color: var(--edbw-title);
+  margin: 0 0 10px;
+}
+
+.edbw-kpi {
+  color: var(--edbw-text);
+  margin-bottom: 6px;
+}
+
+.edbw-chart-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.edbw-chart-panel {
+  min-height: 280px;
+}
+
+.edbw-buy-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.edbw-buy-row select {
+  min-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+@media (max-width: 900px) {
+  .edbw-grid {
+    grid-template-columns: 1fr;
+  }
+}

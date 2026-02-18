@@ -1,0 +1,19 @@
+.edbw-wrap {
+  max-width: 1300px;
+}
+
+.edbw-card {
+  display: inline-block;
+  margin-right: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+}
+
+.edbw-form-inline {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}

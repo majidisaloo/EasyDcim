@@ -74,6 +74,8 @@ final class Settings
             'update_mode' => 'check_oneclick',
             'preflight_strict_mode' => '1',
             'purge_on_deactivate' => '0',
+            'test_mode' => '0',
+            'log_retention_days' => '30',
         ];
     }
 

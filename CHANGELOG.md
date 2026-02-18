@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.17] - 2026-02-19
+### Added
+- New tabbed admin navigation: `Dashboard`, `Settings`, `Packages`, and `Logs`.
+- Color-coded status cards with SVG icons for health/runtime states (green/amber/red/gray).
+- New `test_mode` (dry run) setting to log exact enforcement API commands without applying them.
+- New `log_retention_days` setting and logs cleanup action in admin logs tab.
+### Changed
+- Update actions moved to dashboard quick actions while update configuration remains in settings.
+- Logs tab now shows system logs and traffic purchase logs with retention visibility.
+- Cron now performs automatic logs retention cleanup based on configured days.
+
 ## [1.16] - 2026-02-19
 ### Added
 - New safe deactivate option: `Purge Data On Deactivate` in addon dashboard settings.

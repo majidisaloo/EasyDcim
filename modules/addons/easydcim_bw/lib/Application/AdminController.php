@@ -27,17 +27,18 @@ final class AdminController
 
     public function handle(array $vars): void
     {
-        $action = $_REQUEST['action'] ?? 'dashboard';
+        $action = $_REQUEST['action'] ?? '';
         $api = isset($_GET['api']) ? (string) $_GET['api'] : '';
+        $tab = (string) ($_REQUEST['tab'] ?? 'dashboard');
         $flash = [];
 
         if ($api === 'purchase_logs') {
-            $this->json($this->getPurchaseLogs());
+            $this->json($this->getPurchaseLogs(300));
             return;
         }
 
         if ($api === 'enforcement_logs') {
-            $this->json($this->getEnforcementLogs());
+            $this->json($this->getEnforcementLogs(300));
             return;
         }
 
@@ -46,74 +47,304 @@ final class AdminController
         }
         if ($action === 'add_package') {
             $this->addPackage();
+            $tab = 'packages';
         }
         if ($action === 'save_override') {
             $this->saveOverride();
+            $tab = 'packages';
         }
         if ($action === 'save_settings') {
             $flash[] = $this->saveSettings();
+            $tab = 'settings';
         }
         if ($action === 'test_easydcim') {
             $flash[] = $this->testEasyDcimConnection();
+            $tab = 'settings';
         }
         if ($action === 'run_preflight') {
             $flash[] = ['type' => 'info', 'text' => 'Preflight retest completed.'];
+            $tab = 'dashboard';
         }
         if ($action === 'check_release_update') {
             $flash[] = $this->checkReleaseUpdate();
+            $tab = 'dashboard';
         }
         if ($action === 'apply_release_update') {
             $flash[] = $this->applyReleaseUpdate();
+            $tab = 'dashboard';
+        }
+        if ($action === 'cleanup_logs') {
+            $flash[] = $this->cleanupLogsNow();
+            $tab = 'logs';
         }
 
         $this->settings = new Settings(Settings::loadFromDatabase());
         $version = Version::current($this->moduleDir);
+
+        echo '<link rel="stylesheet" href="../modules/addons/easydcim_bw/assets/admin.css">';
+        echo '<div class="edbw-wrap">';
+        echo '<div class="edbw-header">';
+        echo '<h2>EasyDcim-BW</h2>';
+        echo '<p>Bandwidth control center for EasyDCIM services</p>';
+        echo '</div>';
+
+        foreach ($flash as $msg) {
+            echo '<div class="alert alert-' . htmlspecialchars($msg['type']) . '">' . htmlspecialchars($msg['text']) . '</div>';
+        }
+
+        $moduleLink = (string) ($vars['modulelink'] ?? '');
+        $this->renderTabs($moduleLink, $tab);
+
+        if ($tab === 'settings') {
+            $this->renderSettingsTab();
+        } elseif ($tab === 'packages') {
+            $this->renderPackagesTab();
+        } elseif ($tab === 'logs') {
+            $this->renderLogsTab();
+        } else {
+            $this->renderDashboardTab($version, $moduleLink);
+        }
+
+        echo '</div>';
+    }
+
+    private function renderTabs(string $moduleLink, string $activeTab): void
+    {
+        $tabs = [
+            'dashboard' => 'Dashboard',
+            'settings' => 'Settings',
+            'packages' => 'Packages',
+            'logs' => 'Logs',
+        ];
+
+        echo '<div class="edbw-tabs">';
+        foreach ($tabs as $key => $label) {
+            $class = $key === $activeTab ? 'edbw-tab active' : 'edbw-tab';
+            $url = $moduleLink !== '' ? $moduleLink . '&tab=' . rawurlencode($key) : '?tab=' . rawurlencode($key);
+            echo '<a class="' . $class . '" href="' . htmlspecialchars($url) . '">' . htmlspecialchars($label) . '</a>';
+        }
+        echo '</div>';
+    }
+
+    private function renderDashboardTab(array $version, string $moduleLink): void
+    {
         $updateAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_available')->value('meta_value') === '1';
         $lastPollAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
         $apiFailCount = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
         $updateLock = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
-
-        echo '<link rel="stylesheet" href="../modules/addons/easydcim_bw/assets/admin.css">';
-        echo '<div class="edbw-wrap">';
-        echo '<h2>EasyDcim-BW</h2>';
-        foreach ($flash as $msg) {
-            echo '<div class="alert alert-' . htmlspecialchars($msg['type']) . '">' . htmlspecialchars($msg['text']) . '</div>';
-        }
-        echo '<div class="edbw-metrics">';
-        echo '<div class="edbw-card"><strong>Running Version:</strong> ' . htmlspecialchars($version['module_version']) . '</div>';
-        echo '<div class="edbw-card"><strong>Commit:</strong> ' . htmlspecialchars($version['commit_sha']) . '</div>';
-        echo '<div class="edbw-card"><strong>Update Status:</strong> ' . ($updateAvailable ? 'New commit available' : 'Up to date') . '</div>';
-        echo '<div class="edbw-card"><strong>Last Poll:</strong> ' . htmlspecialchars($lastPollAt ?: 'N/A') . '</div>';
-        echo '<div class="edbw-card"><strong>API Fail Count:</strong> ' . $apiFailCount . '</div>';
-        echo '<div class="edbw-card"><strong>Update Lock:</strong> ' . ($updateLock ? 'Locked' : 'Free') . '</div>';
-        foreach ($this->buildRuntimeStatus() as $card) {
-            echo '<div class="edbw-card"><strong>' . htmlspecialchars($card['label']) . ':</strong> ' . htmlspecialchars($card['value']) . '</div>';
-        }
         $releaseTag = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_latest_tag')->value('meta_value');
         $releaseAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_update_available')->value('meta_value') === '1';
-        echo '<div class="edbw-card"><strong>Latest Release:</strong> ' . htmlspecialchars($releaseTag !== '' ? $releaseTag : 'Unknown') . '</div>';
-        echo '<div class="edbw-card"><strong>Release Update:</strong> ' . ($releaseAvailable ? 'Available' : 'Up to date') . '</div>';
+        $checks = $this->buildHealthChecks();
+        $checkMap = [];
+        foreach ($checks as $row) {
+            $checkMap[$row['name']] = $row['ok'];
+        }
+
+        echo '<div class="edbw-metrics">';
+        $this->renderMetricCard('Version', (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
+        $this->renderMetricCard('Commit', (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
+        $this->renderMetricCard('Update Status', $updateAvailable ? 'New commit available' : 'Up to date', $updateAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
+        $this->renderMetricCard('Release Status', $releaseAvailable ? 'Update available' : 'Up to date', $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M6 4h12v4H6zM5 10h14v10H5zM10 14h4"></path></svg>');
+        $this->renderMetricCard('Cron Poll', $lastPollAt !== '' ? $lastPollAt : 'No data', $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
+        $this->renderMetricCard('API Fail Count', (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
+        $this->renderMetricCard('Update Lock', $updateLock ? 'Locked' : 'Free', $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
+        $this->renderMetricCard('EasyDCIM Connection', (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? 'Configured' : 'Not configured', (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
+
+        foreach ($this->buildRuntimeStatus() as $card) {
+            $this->renderMetricCard($card['label'], $card['value'], $card['state'], $card['icon']);
+        }
+
+        $this->renderMetricCard('Latest Release', $releaseTag !== '' ? $releaseTag : 'Unknown', $releaseTag !== '' ? 'ok' : 'neutral', '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"></path></svg>');
         echo '</div>';
-        $this->renderConnectionSettings();
-        $this->renderPreflightPanel();
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>Update Actions</h3>';
+        echo '<div class="edbw-actions">';
+        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="check_release_update"><button class="btn btn-default" type="submit">Check Update Now</button></form>';
+        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="apply_release_update"><button class="btn btn-primary" type="submit">Apply Latest Release</button></form>';
+        echo '</div>';
+        echo '</div>';
 
         if ($updateAvailable) {
-            $moduleLink = $vars['modulelink'] ?? '';
+            echo '<div class="edbw-panel">';
+            echo '<h3>Git One-Click Update</h3>';
             echo '<form method="post" action="' . htmlspecialchars($moduleLink) . '">';
+            echo '<input type="hidden" name="tab" value="dashboard">';
             echo '<input type="hidden" name="action" value="apply_update">';
-            echo '<button class="btn btn-primary" type="submit">Apply One-Click Update</button>';
+            echo '<button class="btn btn-primary" type="submit">Apply Git Update</button>';
             echo '</form>';
+            echo '</div>';
         }
-        echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="action" value="check_release_update">';
-        echo '<button class="btn btn-default" type="submit">Check Release Update</button>';
-        echo '</form>';
-        echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="action" value="apply_release_update">';
-        echo '<button class="btn btn-primary" type="submit">Apply Latest Release (No shell_exec)</button>';
+
+        $this->renderPreflightPanel();
+    }
+
+    private function renderMetricCard(string $title, string $value, string $state, string $iconSvg): void
+    {
+        echo '<div class="edbw-card edbw-state-' . htmlspecialchars($state) . '">';
+        echo '<div class="edbw-card-icon">' . $iconSvg . '</div>';
+        echo '<div class="edbw-card-body">';
+        echo '<div class="edbw-card-title">' . htmlspecialchars($title) . '</div>';
+        echo '<div class="edbw-card-value">' . htmlspecialchars($value) . '</div>';
+        echo '</div>';
+        echo '</div>';
+    }
+
+    private function renderSettingsTab(): void
+    {
+        $s = $this->settings;
+        echo '<div class="edbw-panel">';
+        echo '<h3>Module Settings</h3>';
+        echo '<form method="post" class="edbw-settings-grid">';
+        echo '<input type="hidden" name="tab" value="settings">';
+        echo '<input type="hidden" name="action" value="save_settings">';
+
+        echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="60"></div>';
+        echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="60"></div>';
+        echo '<div class="edbw-form-inline"><label>Managed PIDs</label><input type="text" name="managed_pids" value="' . htmlspecialchars($s->getString('managed_pids')) . '" size="40"></div>';
+        echo '<div class="edbw-form-inline"><label>Managed GIDs</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="40"></div>';
+        echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Poll Interval (min)</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Graph Cache (min)</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
+
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Enabled</label><input type="checkbox" name="autobuy_enabled" value="1" ' . ($s->getBool('autobuy_enabled') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Threshold GB</label><input type="number" min="1" name="autobuy_threshold_gb" value="' . (int) $s->getInt('autobuy_threshold_gb', 10) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Default Package ID</label><input type="number" min="0" name="autobuy_default_package_id" value="' . (int) $s->getInt('autobuy_default_package_id', 0) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Max/Cycle</label><input type="number" min="1" name="autobuy_max_per_cycle" value="' . (int) $s->getInt('autobuy_max_per_cycle', 5) . '"></div>';
+
+        echo '<div class="edbw-form-inline"><label>Git Update Enabled</label><input type="checkbox" name="git_update_enabled" value="1" ' . ($s->getBool('git_update_enabled') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Git Origin URL</label><input type="text" name="git_origin_url" value="' . htmlspecialchars($s->getString('git_origin_url')) . '" size="60"></div>';
+        echo '<div class="edbw-form-inline"><label>Git Branch</label><input type="text" name="git_branch" value="' . htmlspecialchars($s->getString('git_branch', 'main')) . '" size="20"></div>';
+        echo '<div class="edbw-form-inline"><label>GitHub Repo (owner/name)</label><input type="text" name="github_repo" value="' . htmlspecialchars($s->getString('github_repo', 'majidisaloo/EasyDcim')) . '" size="40"></div>';
+        echo '<div class="edbw-form-inline"><label>Update Mode</label><select name="update_mode">';
+        foreach (['notify', 'check_oneclick', 'auto'] as $mode) {
+            echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
+        }
+        echo '</select></div>';
+
+        echo '<div class="edbw-form-inline"><label>Test Mode (Dry Run)</label><input type="checkbox" name="test_mode" value="1" ' . ($s->getBool('test_mode', false) ? 'checked' : '') . '><span class="edbw-help">No real suspend/disable/enable/unsuspend calls; logs show what would be sent.</span></div>';
+        echo '<div class="edbw-form-inline"><label>Log Retention (days)</label><input type="number" min="1" name="log_retention_days" value="' . (int) $s->getInt('log_retention_days', 30) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Preflight Strict Mode</label><input type="checkbox" name="preflight_strict_mode" value="1" ' . ($s->getBool('preflight_strict_mode', true) ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Purge Data On Deactivate</label><input type="checkbox" name="purge_on_deactivate" value="1" ' . ($s->getBool('purge_on_deactivate', false) ? 'checked' : '') . '><span class="edbw-help">If enabled, all `mod_easydcim_bw_guard_*` tables and module settings are deleted on deactivate.</span></div>';
+
+        echo '<button class="btn btn-primary" type="submit">Save Settings</button>';
         echo '</form>';
 
-        $this->renderTables();
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="tab" value="settings">';
+        echo '<input type="hidden" name="action" value="test_easydcim">';
+        echo '<button class="btn btn-default" type="submit">Test EasyDCIM Connection</button>';
+        echo '</form>';
+        echo '</div>';
+    }
+
+    private function renderPackagesTab(): void
+    {
+        echo '<div class="edbw-panel">';
+        echo '<h3>Traffic Packages</h3>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="tab" value="packages">';
+        echo '<input type="hidden" name="action" value="add_package">';
+        echo '<input type="text" name="pkg_name" placeholder="Package name" required>';
+        echo '<input type="number" step="0.01" min="0.01" name="pkg_size_gb" placeholder="Size GB" required>';
+        echo '<input type="number" step="0.01" min="0" name="pkg_price" placeholder="Price" required>';
+        echo '<button class="btn btn-default" type="submit">Add Package</button>';
+        echo '</form>';
+        $packages = Capsule::table('mod_easydcim_bw_guard_packages')->orderBy('id')->limit(100)->get();
+        echo '<div class="edbw-table-wrap">';
+        echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th></tr></thead><tbody>';
+        foreach ($packages as $pkg) {
+            echo '<tr>';
+            echo '<td>' . (int) $pkg->id . '</td>';
+            echo '<td>' . htmlspecialchars((string) $pkg->name) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $pkg->size_gb) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $pkg->price) . '</td>';
+            echo '<td>' . ((int) $pkg->is_active === 1 ? 'Yes' : 'No') . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '</div>';
+        echo '</div>';
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>Service Overrides (Permanent)</h3>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="tab" value="packages">';
+        echo '<input type="hidden" name="action" value="save_override">';
+        echo '<input type="number" min="1" name="ov_serviceid" placeholder="WHMCS Service ID" required>';
+        echo '<input type="number" step="0.01" min="0" name="ov_quota_gb" placeholder="Base Quota GB">';
+        echo '<select name="ov_mode"><option value="">Mode</option><option value="IN">IN</option><option value="OUT">OUT</option><option value="TOTAL">TOTAL</option></select>';
+        echo '<select name="ov_action"><option value="">Action</option><option value="disable_ports">Disable Ports</option><option value="suspend">Suspend</option><option value="both">Both</option></select>';
+        echo '<button class="btn btn-default" type="submit">Save Override</button>';
+        echo '</form>';
+
+        $overrides = Capsule::table('mod_easydcim_bw_guard_service_overrides')->orderByDesc('id')->limit(200)->get();
+        echo '<div class="edbw-table-wrap">';
+        echo '<table class="table table-striped"><thead><tr><th>Service</th><th>Quota GB</th><th>Mode</th><th>Action</th><th>Updated</th></tr></thead><tbody>';
+        foreach ($overrides as $ov) {
+            echo '<tr>';
+            echo '<td>' . (int) $ov->serviceid . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->override_base_quota_gb) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->override_mode) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->override_action) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $ov->updated_at) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '</div>';
+        echo '</div>';
+    }
+
+    private function renderLogsTab(): void
+    {
+        $retention = max(1, $this->settings->getInt('log_retention_days', 30));
+        echo '<div class="edbw-panel">';
+        echo '<h3>System Logs</h3>';
+        echo '<p class="edbw-help">Retention is set to ' . $retention . ' day(s). Logs older than this are auto-cleaned in cron.</p>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="tab" value="logs">';
+        echo '<input type="hidden" name="action" value="cleanup_logs">';
+        echo '<button class="btn btn-default" type="submit">Cleanup Logs Now</button>';
+        echo '</form>';
+
+        $logs = $this->getSystemLogs(500);
+        echo '<div class="edbw-table-wrap">';
+        echo '<table class="table table-striped"><thead><tr><th>Level</th><th>Message</th><th>Source</th><th>Details</th><th>Time</th></tr></thead><tbody>';
+        foreach ($logs as $log) {
+            $ctx = (string) ($log['context_json'] ?? '');
+            if (strlen($ctx) > 260) {
+                $ctx = substr($ctx, 0, 260) . '...';
+            }
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars((string) $log['level']) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $log['message']) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($log['source'] ?? 'system')) . '</td>';
+            echo '<td><code>' . htmlspecialchars($ctx) . '</code></td>';
+            echo '<td>' . htmlspecialchars((string) $log['created_at']) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '</div>';
+        echo '</div>';
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>Traffic Purchase Logs</h3>';
+        $purchases = $this->getPurchaseLogs(300);
+        echo '<div class="edbw-table-wrap">';
+        echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Service</th><th>Invoice</th><th>Cycle</th><th>Reset</th><th>Actor</th><th>Created</th></tr></thead><tbody>';
+        foreach ($purchases as $row) {
+            echo '<tr>';
+            echo '<td>' . (int) $row['id'] . '</td>';
+            echo '<td>' . (int) $row['whmcs_serviceid'] . '</td>';
+            echo '<td>' . (int) $row['invoiceid'] . '</td>';
+            echo '<td>' . htmlspecialchars((string) $row['cycle_start'] . ' -> ' . (string) $row['cycle_end']) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $row['reset_at']) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $row['actor']) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $row['created_at']) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '</div>';
         echo '</div>';
     }
 
@@ -122,26 +353,31 @@ final class AdminController
         $checks = $this->buildHealthChecks();
         $failed = array_filter($checks, static fn (array $c): bool => !$c['ok']);
 
+        echo '<div class="edbw-panel">';
         echo '<h3>Preflight Checks</h3>';
         echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="tab" value="dashboard">';
         echo '<input type="hidden" name="action" value="run_preflight">';
         echo '<button class="btn btn-default" type="submit">Retest</button>';
         echo '</form>';
+        echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>Check</th><th>Status</th><th>Details</th></tr></thead><tbody>';
         foreach ($checks as $check) {
             echo '<tr>';
             echo '<td>' . htmlspecialchars($check['name']) . '</td>';
-            echo '<td>' . ($check['ok'] ? 'OK' : 'Missing/Fail') . '</td>';
+            echo '<td>' . ($check['ok'] ? '<span class="edbw-badge ok">OK</span>' : '<span class="edbw-badge fail">Missing/Fail</span>') . '</td>';
             echo '<td>' . htmlspecialchars($check['detail']) . '</td>';
             echo '</tr>';
         }
         echo '</tbody></table>';
+        echo '</div>';
 
         if (!empty($failed)) {
             echo '<div class="alert alert-warning">Module can run, but missing items should be fixed before production traffic enforcement.</div>';
         } else {
             echo '<div class="alert alert-success">All preflight checks passed.</div>';
         }
+        echo '</div>';
     }
 
     private function buildHealthChecks(): array
@@ -195,48 +431,12 @@ final class AdminController
         $cronOk = $lastPoll !== '' && strtotime($lastPoll) > time() - 3600;
 
         return [
-            ['label' => 'Cron status', 'value' => $cronOk ? 'Connected' : 'Not running recently'],
-            ['label' => 'Traffic-limited services', 'value' => (string) $limitedCount],
-            ['label' => 'Synced (last 1h)', 'value' => (string) $syncedInLastHour],
-            ['label' => 'Suspended (other reasons)', 'value' => (string) $suspendedOther],
+            ['label' => 'Cron status', 'value' => $cronOk ? 'Connected' : 'Not running recently', 'state' => $cronOk ? 'ok' : 'error', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>'],
+            ['label' => 'Traffic-limited services', 'value' => (string) $limitedCount, 'state' => $limitedCount > 0 ? 'warn' : 'ok', 'icon' => '<svg viewBox="0 0 24 24"><path d="M4 20h16M7 16h10M10 12h4M12 4v4"></path></svg>'],
+            ['label' => 'Synced (last 1h)', 'value' => (string) $syncedInLastHour, 'state' => $syncedInLastHour > 0 ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M3 12h6l3-8 4 16 3-8h2"></path></svg>'],
+            ['label' => 'Suspended (other reasons)', 'value' => (string) $suspendedOther, 'state' => $suspendedOther > 0 ? 'warn' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>'],
+            ['label' => 'Test Mode', 'value' => $this->settings->getBool('test_mode', false) ? 'Enabled (Dry Run)' : 'Disabled', 'state' => $this->settings->getBool('test_mode', false) ? 'warn' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M6 2h12M9 2v4l-5 8a4 4 0 003.4 6h9.2A4 4 0 0020 14l-5-8V2"></path></svg>'],
         ];
-    }
-
-    private function renderConnectionSettings(): void
-    {
-        $s = $this->settings;
-        echo '<h3>Settings</h3>';
-        echo '<form method="post" class="edbw-settings-grid">';
-        echo '<input type="hidden" name="action" value="save_settings">';
-        echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="60"></div>';
-        echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="60"></div>';
-        echo '<div class="edbw-form-inline"><label>Managed PIDs</label><input type="text" name="managed_pids" value="' . htmlspecialchars($s->getString('managed_pids')) . '" size="40"></div>';
-        echo '<div class="edbw-form-inline"><label>Managed GIDs</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="40"></div>';
-        echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation') ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Poll Interval (min)</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Graph Cache (min)</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Enabled</label><input type="checkbox" name="autobuy_enabled" value="1" ' . ($s->getBool('autobuy_enabled') ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Threshold GB</label><input type="number" min="1" name="autobuy_threshold_gb" value="' . (int) $s->getInt('autobuy_threshold_gb', 10) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Default Package ID</label><input type="number" min="0" name="autobuy_default_package_id" value="' . (int) $s->getInt('autobuy_default_package_id', 0) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Max/Cycle</label><input type="number" min="1" name="autobuy_max_per_cycle" value="' . (int) $s->getInt('autobuy_max_per_cycle', 5) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Git Update Enabled</label><input type="checkbox" name="git_update_enabled" value="1" ' . ($s->getBool('git_update_enabled') ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Git Origin URL</label><input type="text" name="git_origin_url" value="' . htmlspecialchars($s->getString('git_origin_url')) . '" size="60"></div>';
-        echo '<div class="edbw-form-inline"><label>Git Branch</label><input type="text" name="git_branch" value="' . htmlspecialchars($s->getString('git_branch', 'main')) . '" size="20"></div>';
-        echo '<div class="edbw-form-inline"><label>GitHub Repo (owner/name)</label><input type="text" name="github_repo" value="' . htmlspecialchars($s->getString('github_repo', 'majidisaloo/EasyDcim')) . '" size="40"></div>';
-        echo '<div class="edbw-form-inline"><label>Update Mode</label><select name="update_mode">';
-        foreach (['notify', 'check_oneclick', 'auto'] as $mode) {
-            echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
-        }
-        echo '</select></div>';
-        echo '<div class="edbw-form-inline"><label>Preflight Strict Mode</label><input type="checkbox" name="preflight_strict_mode" value="1" ' . ($s->getBool('preflight_strict_mode', true) ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Purge Data On Deactivate</label><input type="checkbox" name="purge_on_deactivate" value="1" ' . ($s->getBool('purge_on_deactivate', false) ? 'checked' : '') . '><span class="edbw-help">If enabled, all `mod_easydcim_bw_guard_*` tables and module settings are deleted on deactivate.</span></div>';
-        echo '<button class="btn btn-primary" type="submit">Save Settings</button>';
-        echo '</form>';
-
-        echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="action" value="test_easydcim">';
-        echo '<button class="btn btn-default" type="submit">Test EasyDCIM Connection</button>';
-        echo '</form>';
     }
 
     private function saveSettings(): array
@@ -244,7 +444,7 @@ final class AdminController
         $current = Settings::loadFromDatabase();
         $payload = $current;
         $keys = array_keys(Settings::defaults());
-        $boolKeys = ['git_update_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate'];
+        $boolKeys = ['git_update_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode'];
         foreach ($keys as $key) {
             if (in_array($key, $boolKeys, true)) {
                 $payload[$key] = isset($_POST[$key]) ? '1' : '0';
@@ -261,6 +461,10 @@ final class AdminController
             $payload['easydcim_api_token'] = function_exists('encrypt') ? encrypt($newToken) : $newToken;
         } else {
             $payload['easydcim_api_token'] = $current['easydcim_api_token'] ?? '';
+        }
+
+        if ((int) ($payload['log_retention_days'] ?? 30) < 1) {
+            $payload['log_retention_days'] = '30';
         }
 
         Settings::saveToDatabase($payload);
@@ -284,6 +488,18 @@ final class AdminController
             return ['type' => 'warning', 'text' => 'EasyDCIM is reachable but response is not healthy.'];
         } catch (\Throwable $e) {
             return ['type' => 'danger', 'text' => 'EasyDCIM test failed: ' . $e->getMessage()];
+        }
+    }
+
+    private function cleanupLogsNow(): array
+    {
+        try {
+            $days = max(1, $this->settings->getInt('log_retention_days', 30));
+            $cutoff = date('Y-m-d H:i:s', time() - ($days * 86400));
+            $deleted = Capsule::table('mod_easydcim_bw_guard_logs')->where('created_at', '<', $cutoff)->delete();
+            return ['type' => 'success', 'text' => 'Log cleanup complete. Removed ' . (int) $deleted . ' rows.'];
+        } catch (\Throwable $e) {
+            return ['type' => 'danger', 'text' => 'Log cleanup failed: ' . $e->getMessage()];
         }
     }
 
@@ -475,89 +691,6 @@ final class AdminController
         return ($aMaj <=> $bMaj) ?: ($aMin <=> $bMin);
     }
 
-    private function renderTables(): void
-    {
-        echo '<h3>Traffic Packages</h3>';
-        echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="action" value="add_package">';
-        echo '<input type="text" name="pkg_name" placeholder="Package name" required>';
-        echo '<input type="number" step="0.01" min="0.01" name="pkg_size_gb" placeholder="Size GB" required>';
-        echo '<input type="number" step="0.01" min="0" name="pkg_price" placeholder="Price" required>';
-        echo '<button class="btn btn-default" type="submit">Add Package</button>';
-        echo '</form>';
-        $packages = Capsule::table('mod_easydcim_bw_guard_packages')->orderBy('id')->limit(100)->get();
-        echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th></tr></thead><tbody>';
-        foreach ($packages as $pkg) {
-            echo '<tr>';
-            echo '<td>' . (int) $pkg->id . '</td>';
-            echo '<td>' . htmlspecialchars((string) $pkg->name) . '</td>';
-            echo '<td>' . htmlspecialchars((string) $pkg->size_gb) . '</td>';
-            echo '<td>' . htmlspecialchars((string) $pkg->price) . '</td>';
-            echo '<td>' . ((int) $pkg->is_active === 1 ? 'Yes' : 'No') . '</td>';
-            echo '</tr>';
-        }
-        echo '</tbody></table>';
-        echo '</div>';
-
-        echo '<h3>Service Overrides (Permanent)</h3>';
-        echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="action" value="save_override">';
-        echo '<input type="number" min="1" name="ov_serviceid" placeholder="WHMCS Service ID" required>';
-        echo '<input type="number" step="0.01" min="0" name="ov_quota_gb" placeholder="Base Quota GB">';
-        echo '<select name="ov_mode"><option value="">Mode</option><option value="IN">IN</option><option value="OUT">OUT</option><option value="TOTAL">TOTAL</option></select>';
-        echo '<select name="ov_action"><option value="">Action</option><option value="disable_ports">Disable Ports</option><option value="suspend">Suspend</option><option value="both">Both</option></select>';
-        echo '<button class="btn btn-default" type="submit">Save Override</button>';
-        echo '</form>';
-
-        $overrides = Capsule::table('mod_easydcim_bw_guard_service_overrides')->orderByDesc('id')->limit(200)->get();
-        echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>Service</th><th>Quota GB</th><th>Mode</th><th>Action</th><th>Updated</th></tr></thead><tbody>';
-        foreach ($overrides as $ov) {
-            echo '<tr>';
-            echo '<td>' . (int) $ov->serviceid . '</td>';
-            echo '<td>' . htmlspecialchars((string) $ov->override_base_quota_gb) . '</td>';
-            echo '<td>' . htmlspecialchars((string) $ov->override_mode) . '</td>';
-            echo '<td>' . htmlspecialchars((string) $ov->override_action) . '</td>';
-            echo '<td>' . htmlspecialchars((string) $ov->updated_at) . '</td>';
-            echo '</tr>';
-        }
-        echo '</tbody></table>';
-        echo '</div>';
-
-        $purchases = $this->getPurchaseLogs();
-        echo '<h3>Traffic Purchase Logs</h3>';
-        echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Service</th><th>Invoice</th><th>Cycle</th><th>Reset</th><th>Actor</th><th>Created</th></tr></thead><tbody>';
-        foreach ($purchases as $row) {
-            echo '<tr>';
-            echo '<td>' . (int) $row['id'] . '</td>';
-            echo '<td>' . (int) $row['whmcs_serviceid'] . '</td>';
-            echo '<td>' . (int) $row['invoiceid'] . '</td>';
-            echo '<td>' . htmlspecialchars($row['cycle_start'] . ' -> ' . $row['cycle_end']) . '</td>';
-            echo '<td>' . htmlspecialchars($row['reset_at']) . '</td>';
-            echo '<td>' . htmlspecialchars($row['actor']) . '</td>';
-            echo '<td>' . htmlspecialchars($row['created_at']) . '</td>';
-            echo '</tr>';
-        }
-        echo '</tbody></table>';
-        echo '</div>';
-
-        $logs = $this->getEnforcementLogs();
-        echo '<h3>Enforcement Logs</h3>';
-        echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>Level</th><th>Message</th><th>Time</th></tr></thead><tbody>';
-        foreach ($logs as $log) {
-            echo '<tr>';
-            echo '<td>' . htmlspecialchars($log['level']) . '</td>';
-            echo '<td>' . htmlspecialchars($log['message']) . '</td>';
-            echo '<td>' . htmlspecialchars($log['created_at']) . '</td>';
-            echo '</tr>';
-        }
-        echo '</tbody></table>';
-        echo '</div>';
-    }
-
     private function applyOneClickUpdate(): void
     {
         $manager = new GitUpdateManager($this->moduleDir, $this->logger);
@@ -572,22 +705,32 @@ final class AdminController
         }
     }
 
-    private function getPurchaseLogs(): array
+    private function getPurchaseLogs(int $limit = 200): array
     {
         return Capsule::table('mod_easydcim_bw_guard_purchases')
             ->orderByDesc('id')
-            ->limit(200)
+            ->limit($limit)
             ->get()
             ->map(static fn ($r): array => (array) $r)
             ->all();
     }
 
-    private function getEnforcementLogs(): array
+    private function getEnforcementLogs(int $limit = 200): array
     {
         return Capsule::table('mod_easydcim_bw_guard_logs')
-            ->whereIn('message', ['traffic_enforced', 'traffic_unlocked', 'service_poll_failed'])
+            ->whereIn('message', ['traffic_enforced', 'traffic_unlocked', 'service_poll_failed', 'test_mode_action'])
             ->orderByDesc('id')
-            ->limit(200)
+            ->limit($limit)
+            ->get()
+            ->map(static fn ($r): array => (array) $r)
+            ->all();
+    }
+
+    private function getSystemLogs(int $limit = 400): array
+    {
+        return Capsule::table('mod_easydcim_bw_guard_logs')
+            ->orderByDesc('id')
+            ->limit($limit)
             ->get()
             ->map(static fn ($r): array => (array) $r)
             ->all();

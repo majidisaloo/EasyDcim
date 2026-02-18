@@ -35,6 +35,8 @@ final class CronRunner
         }
 
         try {
+            $this->cleanupOldLogs();
+
             if ($this->apiCircuitOpen()) {
                 $this->logger->log('WARNING', 'poll_skipped_circuit_open');
                 return;
@@ -44,7 +46,11 @@ final class CronRunner
             $client = $this->buildEasyDcimClient();
             $cycleCalc = new CycleCalculator();
             $quotaResolver = new QuotaResolver();
-            $enforcement = new EnforcementService($client, $this->logger);
+            $testMode = $this->settings->getBool('test_mode', false);
+            $enforcement = new EnforcementService($client, $this->logger, $testMode);
+            if ($testMode) {
+                $this->logger->log('INFO', 'test_mode_enabled', ['scope' => 'cron_poll']);
+            }
             $purchaseService = new PurchaseService($this->logger);
 
             foreach ($services as $service) {
@@ -356,6 +362,20 @@ final class CronRunner
         ]);
 
         return (float) $package->size_gb;
+    }
+
+    private function cleanupOldLogs(): void
+    {
+        $days = max(1, $this->settings->getInt('log_retention_days', 30));
+        $cutoff = date('Y-m-d H:i:s', time() - ($days * 86400));
+        try {
+            $deleted = Capsule::table('mod_easydcim_bw_guard_logs')->where('created_at', '<', $cutoff)->delete();
+            if ($deleted > 0) {
+                $this->logger->log('INFO', 'logs_retention_cleanup', ['deleted' => $deleted, 'days' => $days]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'logs_retention_cleanup_failed', ['error' => $e->getMessage()]);
+        }
     }
 
     private function createAndPayInvoice(int $userId, int $serviceId, float $price, float $sizeGb): int

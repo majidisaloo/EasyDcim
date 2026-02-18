@@ -6,7 +6,7 @@ namespace EasyDcimBandwidthGuard\Support;
 
 final class Version
 {
-    private const FALLBACK_VERSION = '1.12';
+    private const FALLBACK_VERSION = '1.13';
 
     public static function current(string $moduleDir): array
     {

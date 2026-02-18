@@ -19,20 +19,17 @@ final class Migrator
 
     public function migrate(): void
     {
-        $conn = Capsule::connection();
-        $conn->transaction(function (): void {
-            $this->createProductDefaults();
-            $this->createServiceState();
-            $this->createPurchases();
-            $this->createGraphCache();
-            $this->createLogs();
-            $this->createMeta();
-            $this->createUpdateLog();
-            $this->createPackages();
-            $this->createServiceOverrides();
-            $this->addMissingColumns();
-            $this->addIndexes();
-        });
+        $this->createProductDefaults();
+        $this->createServiceState();
+        $this->createPurchases();
+        $this->createGraphCache();
+        $this->createLogs();
+        $this->createMeta();
+        $this->createUpdateLog();
+        $this->createPackages();
+        $this->createServiceOverrides();
+        $this->addMissingColumns();
+        $this->addIndexes();
     }
 
     private function createProductDefaults(): void

@@ -47,6 +47,9 @@ final class AdminController
         if ($action === 'save_override') {
             $this->saveOverride();
         }
+        if ($action === 'run_preflight') {
+            echo '<div class="alert alert-info">Preflight retest completed.</div>';
+        }
 
         $version = Version::current($this->moduleDir);
         $updateAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_available')->value('meta_value') === '1';
@@ -63,6 +66,7 @@ final class AdminController
         echo '<div class="edbw-card"><strong>Last Poll:</strong> ' . htmlspecialchars($lastPollAt ?: 'N/A') . '</div>';
         echo '<div class="edbw-card"><strong>API Fail Count:</strong> ' . $apiFailCount . '</div>';
         echo '<div class="edbw-card"><strong>Update Lock:</strong> ' . ($updateLock ? 'Locked' : 'Free') . '</div>';
+        $this->renderPreflightPanel();
 
         if ($updateAvailable) {
             $moduleLink = $vars['modulelink'] ?? '';
@@ -74,6 +78,67 @@ final class AdminController
 
         $this->renderTables();
         echo '</div>';
+    }
+
+    private function renderPreflightPanel(): void
+    {
+        $checks = $this->buildHealthChecks();
+        $failed = array_filter($checks, static fn (array $c): bool => !$c['ok']);
+
+        echo '<h3>Preflight Checks</h3>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="action" value="run_preflight">';
+        echo '<button class="btn btn-default" type="submit">Retest</button>';
+        echo '</form>';
+        echo '<table class="table table-striped"><thead><tr><th>Check</th><th>Status</th><th>Details</th></tr></thead><tbody>';
+        foreach ($checks as $check) {
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars($check['name']) . '</td>';
+            echo '<td>' . ($check['ok'] ? 'OK' : 'Missing/Fail') . '</td>';
+            echo '<td>' . htmlspecialchars($check['detail']) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+
+        if (!empty($failed)) {
+            echo '<div class="alert alert-warning">Module can run, but missing items should be fixed before production traffic enforcement.</div>';
+        } else {
+            echo '<div class="alert alert-success">All preflight checks passed.</div>';
+        }
+    }
+
+    private function buildHealthChecks(): array
+    {
+        $checks = [];
+        $phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
+        $checks[] = ['name' => 'PHP version', 'ok' => $phpOk, 'detail' => 'Current: ' . PHP_VERSION . ', required: >= 8.0'];
+
+        $checks[] = ['name' => 'cURL extension', 'ok' => function_exists('curl_init'), 'detail' => function_exists('curl_init') ? 'Available' : 'Missing'];
+        $checks[] = ['name' => 'shell_exec for git update', 'ok' => function_exists('shell_exec'), 'detail' => function_exists('shell_exec') ? 'Available' : 'Disabled'];
+
+        $baseUrl = $this->settings->getString('easydcim_base_url');
+        $token = $this->settings->getString('easydcim_api_token');
+        $checks[] = ['name' => 'EasyDCIM Base URL', 'ok' => $baseUrl !== '', 'detail' => $baseUrl !== '' ? 'Configured' : 'Not configured'];
+        $checks[] = ['name' => 'EasyDCIM API Token', 'ok' => $token !== '', 'detail' => $token !== '' ? 'Configured' : 'Not configured'];
+
+        $scopeSet = !empty($this->settings->getCsvList('managed_pids')) || !empty($this->settings->getCsvList('managed_gids'));
+        $checks[] = ['name' => 'Managed scope (PID/GID)', 'ok' => $scopeSet, 'detail' => $scopeSet ? 'Configured' : 'No PID/GID set'];
+
+        $requiredCustomFields = ['easydcim_service_id', 'easydcim_order_id', 'easydcim_server_id'];
+        $existing = Capsule::table('tblcustomfields')
+            ->where('type', 'product')
+            ->pluck('fieldname')
+            ->map(static fn ($n): string => strtolower(trim(explode('|', (string) $n)[0])))
+            ->all();
+        foreach ($requiredCustomFields as $field) {
+            $checks[] = [
+                'name' => 'Custom field: ' . $field,
+                'ok' => in_array($field, $existing, true),
+                'detail' => in_array($field, $existing, true) ? 'Found' : 'Missing',
+            ];
+        }
+
+        return $checks;
     }
 
     private function renderTables(): void

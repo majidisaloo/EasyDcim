@@ -6,18 +6,19 @@ namespace EasyDcimBandwidthGuard\Support;
 
 final class Version
 {
-    public const BASE_VERSION = '1.0';
-
     public static function current(string $moduleDir): array
     {
-        $sha = self::runGit($moduleDir, 'rev-parse --short HEAD') ?? 'nogit';
-        $ts = self::runGit($moduleDir, 'show -s --format=%ct HEAD') ?? (string) time();
-        $build = ctype_digit($ts) ? date('YmdHis', (int) $ts) : date('YmdHis');
+        $sha = self::runGit($moduleDir, 'rev-parse --short HEAD') ?? 'n/a';
+        $countRaw = self::runGit($moduleDir, 'rev-list --count HEAD') ?? '1';
+        $count = ctype_digit($countRaw) ? max(1, (int) $countRaw) : 1;
+
+        $major = intdiv($count - 1, 100) + 1;
+        $minor = $count % 100;
 
         return [
-            'module_version' => self::BASE_VERSION . '.' . $build . '+' . $sha,
+            'module_version' => sprintf('%d.%02d', $major, $minor),
             'commit_sha' => $sha,
-            'commit_unix_ts' => ctype_digit($ts) ? (int) $ts : time(),
+            'commit_unix_ts' => time(),
         ];
     }
 

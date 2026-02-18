@@ -22,7 +22,7 @@ final class Module
 
         return [
             'name' => 'EasyDcim-BW',
-            'description' => 'Cycle-aware traffic control with EasyDCIM API, one-click git updates, and production-safe migrations.',
+            'description' => 'Traffic control for EasyDCIM with safe migrations and Git updates.',
             'version' => $version['module_version'],
             'author' => 'Majid Isaloo',
             'fields' => [

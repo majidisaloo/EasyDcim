@@ -68,6 +68,7 @@ final class Settings
             'git_update_enabled' => '0',
             'git_origin_url' => '',
             'git_branch' => 'main',
+            'github_repo' => 'majidisaloo/EasyDcim',
             'update_channel' => 'commit',
             'update_check_interval_minutes' => '30',
             'update_mode' => 'check_oneclick',

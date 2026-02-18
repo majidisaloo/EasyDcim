@@ -59,6 +59,12 @@ final class AdminController
         if ($action === 'run_preflight') {
             $flash[] = ['type' => 'info', 'text' => 'Preflight retest completed.'];
         }
+        if ($action === 'check_release_update') {
+            $flash[] = $this->checkReleaseUpdate();
+        }
+        if ($action === 'apply_release_update') {
+            $flash[] = $this->applyReleaseUpdate();
+        }
 
         $this->settings = new Settings(Settings::loadFromDatabase());
         $version = Version::current($this->moduleDir);
@@ -82,6 +88,10 @@ final class AdminController
         foreach ($this->buildRuntimeStatus() as $card) {
             echo '<div class="edbw-card"><strong>' . htmlspecialchars($card['label']) . ':</strong> ' . htmlspecialchars($card['value']) . '</div>';
         }
+        $releaseTag = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_latest_tag')->value('meta_value');
+        $releaseAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_update_available')->value('meta_value') === '1';
+        echo '<div class="edbw-card"><strong>Latest Release:</strong> ' . htmlspecialchars($releaseTag !== '' ? $releaseTag : 'Unknown') . '</div>';
+        echo '<div class="edbw-card"><strong>Release Update:</strong> ' . ($releaseAvailable ? 'Available' : 'Up to date') . '</div>';
         $this->renderConnectionSettings();
         $this->renderPreflightPanel();
 
@@ -92,6 +102,14 @@ final class AdminController
             echo '<button class="btn btn-primary" type="submit">Apply One-Click Update</button>';
             echo '</form>';
         }
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="action" value="check_release_update">';
+        echo '<button class="btn btn-default" type="submit">Check Release Update</button>';
+        echo '</form>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="action" value="apply_release_update">';
+        echo '<button class="btn btn-primary" type="submit">Apply Latest Release (No shell_exec)</button>';
+        echo '</form>';
 
         $this->renderTables();
         echo '</div>';
@@ -131,7 +149,8 @@ final class AdminController
         $checks[] = ['name' => 'PHP version', 'ok' => $phpOk, 'detail' => 'Current: ' . PHP_VERSION . ', required: >= 8.0'];
 
         $checks[] = ['name' => 'cURL extension', 'ok' => function_exists('curl_init'), 'detail' => function_exists('curl_init') ? 'Available' : 'Missing'];
-        $checks[] = ['name' => 'shell_exec for git update', 'ok' => function_exists('shell_exec'), 'detail' => function_exists('shell_exec') ? 'Available' : 'Disabled'];
+        $checks[] = ['name' => 'Git mode capability (shell_exec)', 'ok' => function_exists('shell_exec'), 'detail' => function_exists('shell_exec') ? 'Available' : 'Disabled (use release update mode)'];
+        $checks[] = ['name' => 'ZIP extension', 'ok' => class_exists(\ZipArchive::class), 'detail' => class_exists(\ZipArchive::class) ? 'Available' : 'Missing'];
 
         $baseUrl = $this->settings->getString('easydcim_base_url');
         $token = $this->settings->getString('easydcim_api_token');
@@ -201,6 +220,7 @@ final class AdminController
         echo '<div class="edbw-form-inline"><label>Git Update Enabled</label><input type="checkbox" name="git_update_enabled" value="1" ' . ($s->getBool('git_update_enabled') ? 'checked' : '') . '></div>';
         echo '<div class="edbw-form-inline"><label>Git Origin URL</label><input type="text" name="git_origin_url" value="' . htmlspecialchars($s->getString('git_origin_url')) . '" size="60"></div>';
         echo '<div class="edbw-form-inline"><label>Git Branch</label><input type="text" name="git_branch" value="' . htmlspecialchars($s->getString('git_branch', 'main')) . '" size="20"></div>';
+        echo '<div class="edbw-form-inline"><label>GitHub Repo (owner/name)</label><input type="text" name="github_repo" value="' . htmlspecialchars($s->getString('github_repo', 'majidisaloo/EasyDcim')) . '" size="40"></div>';
         echo '<div class="edbw-form-inline"><label>Update Mode</label><select name="update_mode">';
         foreach (['notify', 'check_oneclick', 'auto'] as $mode) {
             echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
@@ -261,6 +281,194 @@ final class AdminController
         } catch (\Throwable $e) {
             return ['type' => 'danger', 'text' => 'EasyDCIM test failed: ' . $e->getMessage()];
         }
+    }
+
+    private function checkReleaseUpdate(): array
+    {
+        try {
+            $repo = $this->settings->getString('github_repo', 'majidisaloo/EasyDcim');
+            $release = $this->fetchLatestRelease($repo);
+            $latestTag = (string) ($release['tag_name'] ?? '');
+            $latestVersion = ltrim($latestTag, 'vV');
+            $currentVersion = Version::current($this->moduleDir)['module_version'];
+            $available = $this->compareVersion($latestVersion, $currentVersion) > 0;
+
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_latest_tag'],
+                ['meta_value' => $latestTag, 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_latest_zip'],
+                ['meta_value' => (string) $this->extractZipUrl($release), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_update_available'],
+                ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+
+            return ['type' => 'success', 'text' => $available ? ('New release found: ' . $latestTag) : 'No newer release found.'];
+        } catch (\Throwable $e) {
+            return ['type' => 'danger', 'text' => 'Release check failed: ' . $e->getMessage()];
+        }
+    }
+
+    private function applyReleaseUpdate(): array
+    {
+        try {
+            if (!class_exists(\ZipArchive::class)) {
+                throw new \RuntimeException('ZipArchive extension is required.');
+            }
+
+            $repo = $this->settings->getString('github_repo', 'majidisaloo/EasyDcim');
+            $release = $this->fetchLatestRelease($repo);
+            $zipUrl = $this->extractZipUrl($release);
+            if ($zipUrl === '') {
+                throw new \RuntimeException('No ZIP asset found in latest release.');
+            }
+
+            $tmpZip = tempnam(sys_get_temp_dir(), 'edbw_rel_');
+            if ($tmpZip === false) {
+                throw new \RuntimeException('Could not allocate temp file.');
+            }
+            $this->downloadFile($zipUrl, $tmpZip);
+            $this->extractAddonFromZip($tmpZip);
+            @unlink($tmpZip);
+
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_update_available'],
+                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+
+            return ['type' => 'success', 'text' => 'Release update applied successfully.'];
+        } catch (\Throwable $e) {
+            return ['type' => 'danger', 'text' => 'Release update failed: ' . $e->getMessage()];
+        }
+    }
+
+    private function fetchLatestRelease(string $repo): array
+    {
+        $repo = trim($repo);
+        if (!preg_match('/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/', $repo)) {
+            throw new \RuntimeException('GitHub repo format must be owner/repo.');
+        }
+        $url = 'https://api.github.com/repos/' . $repo . '/releases/latest';
+        $response = $this->httpGetJson($url);
+        if (!isset($response['tag_name'])) {
+            throw new \RuntimeException('GitHub latest release payload is invalid.');
+        }
+        return $response;
+    }
+
+    private function extractZipUrl(array $release): string
+    {
+        foreach (($release['assets'] ?? []) as $asset) {
+            $name = strtolower((string) ($asset['name'] ?? ''));
+            if (substr($name, -4) === '.zip' && !empty($asset['browser_download_url'])) {
+                return (string) $asset['browser_download_url'];
+            }
+        }
+        return '';
+    }
+
+    private function httpGetJson(string $url): array
+    {
+        if (!function_exists('curl_init')) {
+            throw new \RuntimeException('cURL extension is required.');
+        }
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW', 'Accept: application/vnd.github+json']);
+        $raw = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if ($code < 200 || $code >= 300) {
+            throw new \RuntimeException('HTTP ' . $code . ' ' . $err);
+        }
+
+        $data = json_decode((string) $raw, true);
+        if (!is_array($data)) {
+            throw new \RuntimeException('Invalid JSON response.');
+        }
+        return $data;
+    }
+
+    private function downloadFile(string $url, string $target): void
+    {
+        $fh = fopen($target, 'wb');
+        if ($fh === false) {
+            throw new \RuntimeException('Cannot open temp file for writing.');
+        }
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_FILE, $fh);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 120);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW']);
+        curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        fclose($fh);
+
+        if ($code < 200 || $code >= 300) {
+            throw new \RuntimeException('Download failed: HTTP ' . $code . ' ' . $err);
+        }
+    }
+
+    private function extractAddonFromZip(string $zipPath): void
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($zipPath) !== true) {
+            throw new \RuntimeException('Cannot open downloaded ZIP.');
+        }
+
+        $whmcsRoot = realpath($this->moduleDir . '/../../../');
+        if ($whmcsRoot === false) {
+            $zip->close();
+            throw new \RuntimeException('Cannot resolve WHMCS root path.');
+        }
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            if (!is_string($name) || strpos($name, 'modules/addons/easydcim_bw/') !== 0) {
+                continue;
+            }
+            $target = $whmcsRoot . '/' . $name;
+            if (substr($name, -1) === '/') {
+                if (!is_dir($target)) {
+                    mkdir($target, 0755, true);
+                }
+                continue;
+            }
+
+            $dir = dirname($target);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            $content = $zip->getFromIndex($i);
+            if ($content === false) {
+                continue;
+            }
+            file_put_contents($target, $content);
+        }
+        $zip->close();
+    }
+
+    private function compareVersion(string $a, string $b): int
+    {
+        $normalize = static function (string $v): array {
+            if (!preg_match('/^(\\d+)\\.(\\d{1,2})$/', trim($v), $m)) {
+                return [0, 0];
+            }
+            return [(int) $m[1], (int) $m[2]];
+        };
+        [$aMaj, $aMin] = $normalize($a);
+        [$bMaj, $bMin] = $normalize($b);
+        return ($aMaj <=> $bMaj) ?: ($aMin <=> $bMin);
     }
 
     private function renderTables(): void

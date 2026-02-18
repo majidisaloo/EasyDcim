@@ -7,9 +7,10 @@ Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git u
 - Cycle-aware traffic calculation from `nextduedate` and billing cycle.
 - EasyDCIM API integration for bandwidth, ports, suspend/unsuspend, and graph export.
 - Port enforcement resolves port IDs by service, with fallback by `easydcim_server_id`.
-- Short commit-based version string: `major.minor` (e.g. `1.11`).
-- Auto update check (`git ls-remote`) + one-click admin update (`git pull --ff-only`).
+- Short version from `modules/addons/easydcim_bw/VERSION` (e.g. `1.16`) with git metadata when available.
+- Auto update check from GitHub releases + one-click admin update without `shell_exec`.
 - Strict additive/idempotent migrations only on `mod_easydcim_bw_guard_*` tables.
+- Deactivate keeps all module data/settings by default; optional `Purge Data On Deactivate` removes only module tables/settings.
 - Purchase logs include invoice, cycle window, reset date, actor, and timestamp.
 - Admin package management and client one-time per-cycle purchase flow.
 - Auto-buy from client credit with max-purchases-per-cycle guard.
@@ -38,6 +39,6 @@ Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git u
 
 Default mode is `check_oneclick`:
 
-- Cron checks for new commit.
+- Cron/check action checks latest GitHub release.
 - Admin sees availability in dashboard.
-- Admin applies update with one click.
+- Admin applies latest release zip with one click (no shell access required).

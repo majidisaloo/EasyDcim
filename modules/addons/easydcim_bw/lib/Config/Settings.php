@@ -73,6 +73,7 @@ final class Settings
             'update_check_interval_minutes' => '30',
             'update_mode' => 'check_oneclick',
             'preflight_strict_mode' => '1',
+            'purge_on_deactivate' => '0',
         ];
     }
 

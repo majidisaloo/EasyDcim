@@ -1,19 +1,83 @@
 .edbw-wrap {
-  max-width: 1300px;
+  --edbw-bg: #f4f7fb;
+  --edbw-card: #ffffff;
+  --edbw-border: #d8e1ec;
+  --edbw-accent: #0f766e;
+  --edbw-text: #1f2937;
+  max-width: 1320px;
+  color: var(--edbw-text);
+  background: linear-gradient(145deg, #f7fafc 0%, #eef4fb 100%);
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.edbw-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
 .edbw-card {
-  display: inline-block;
-  margin-right: 12px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid #dbeafe;
-  background: #eff6ff;
+  border: 1px solid var(--edbw-border);
+  background: var(--edbw-card);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
 }
 
 .edbw-form-inline {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  background: var(--edbw-card);
+  border: 1px solid var(--edbw-border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.edbw-form-inline label {
+  min-width: 230px;
+  font-weight: 600;
+}
+
+.edbw-form-inline input[type="text"],
+.edbw-form-inline input[type="password"],
+.edbw-form-inline input[type="number"],
+.edbw-form-inline select {
+  min-width: 180px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+.edbw-form-inline input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+
+.edbw-help {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.edbw-table-wrap {
+  overflow-x: auto;
+  background: var(--edbw-card);
+  border: 1px solid var(--edbw-border);
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 14px;
+}
+
+.edbw-wrap h2,
+.edbw-wrap h3 {
+  color: #0b3a53;
+}
+
+.edbw-wrap .btn-primary {
+  background: var(--edbw-accent);
+  border-color: var(--edbw-accent);
 }

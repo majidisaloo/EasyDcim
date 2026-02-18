@@ -6,10 +6,19 @@ namespace EasyDcimBandwidthGuard\Support;
 
 final class Version
 {
-    private const FALLBACK_VERSION = '1.13';
+    private const FALLBACK_VERSION = '1.15';
 
     public static function current(string $moduleDir): array
     {
+        $fileVersion = self::readVersionFile($moduleDir);
+        if ($fileVersion !== null) {
+            return [
+                'module_version' => $fileVersion,
+                'commit_sha' => self::runGit($moduleDir, 'rev-parse --short HEAD') ?? 'release',
+                'commit_unix_ts' => (int) (self::runGit($moduleDir, 'show -s --format=%ct HEAD') ?? (string) time()),
+            ];
+        }
+
         $sha = self::runGit($moduleDir, 'rev-parse --short HEAD') ?? 'release';
         $countRaw = self::runGit($moduleDir, 'rev-list --count HEAD');
         if ($countRaw === null || !ctype_digit($countRaw)) {
@@ -31,14 +40,45 @@ final class Version
         ];
     }
 
+    private static function readVersionFile(string $moduleDir): ?string
+    {
+        $path = rtrim($moduleDir, '/') . '/VERSION';
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $raw = trim((string) @file_get_contents($path));
+        if (!preg_match('/^\d+\.\d{2}$/', $raw)) {
+            return null;
+        }
+
+        return $raw;
+    }
+
     private static function runGit(string $moduleDir, string $cmd): ?string
     {
         if (!function_exists('shell_exec')) {
             return null;
         }
 
-        $root = escapeshellarg(realpath($moduleDir . '/../../..') ?: $moduleDir);
-        $out = shell_exec("git -C {$root} {$cmd} 2>/dev/null");
+        $roots = [
+            realpath($moduleDir . '/../../../..') ?: null,
+            realpath($moduleDir . '/../../..') ?: null,
+            realpath($moduleDir) ?: null,
+        ];
+
+        $out = null;
+        foreach ($roots as $root) {
+            if (!is_string($root) || $root === '') {
+                continue;
+            }
+            $escapedRoot = escapeshellarg($root);
+            $out = shell_exec("git -C {$escapedRoot} {$cmd} 2>/dev/null");
+            if (is_string($out) && trim($out) !== '') {
+                break;
+            }
+        }
+
         if (!is_string($out)) {
             return null;
         }

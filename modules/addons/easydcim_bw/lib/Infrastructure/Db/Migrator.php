@@ -32,6 +32,29 @@ final class Migrator
         $this->addIndexes();
     }
 
+    public function purgeModuleData(): void
+    {
+        $tables = [
+            'mod_easydcim_bw_guard_graph_cache',
+            'mod_easydcim_bw_guard_update_log',
+            'mod_easydcim_bw_guard_purchases',
+            'mod_easydcim_bw_guard_service_state',
+            'mod_easydcim_bw_guard_service_overrides',
+            'mod_easydcim_bw_guard_product_defaults',
+            'mod_easydcim_bw_guard_packages',
+            'mod_easydcim_bw_guard_logs',
+            'mod_easydcim_bw_guard_meta',
+        ];
+
+        foreach ($tables as $table) {
+            try {
+                Capsule::schema()->dropIfExists($table);
+            } catch (\Throwable $e) {
+                $this->logger->log('ERROR', 'purge_table_failed', ['table' => $table, 'error' => $e->getMessage()]);
+            }
+        }
+    }
+
     private function createProductDefaults(): void
     {
         if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_product_defaults')) {

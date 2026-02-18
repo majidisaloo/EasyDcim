@@ -79,6 +79,7 @@ final class AdminController
         foreach ($flash as $msg) {
             echo '<div class="alert alert-' . htmlspecialchars($msg['type']) . '">' . htmlspecialchars($msg['text']) . '</div>';
         }
+        echo '<div class="edbw-metrics">';
         echo '<div class="edbw-card"><strong>Running Version:</strong> ' . htmlspecialchars($version['module_version']) . '</div>';
         echo '<div class="edbw-card"><strong>Commit:</strong> ' . htmlspecialchars($version['commit_sha']) . '</div>';
         echo '<div class="edbw-card"><strong>Update Status:</strong> ' . ($updateAvailable ? 'New commit available' : 'Up to date') . '</div>';
@@ -92,6 +93,7 @@ final class AdminController
         $releaseAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_update_available')->value('meta_value') === '1';
         echo '<div class="edbw-card"><strong>Latest Release:</strong> ' . htmlspecialchars($releaseTag !== '' ? $releaseTag : 'Unknown') . '</div>';
         echo '<div class="edbw-card"><strong>Release Update:</strong> ' . ($releaseAvailable ? 'Available' : 'Up to date') . '</div>';
+        echo '</div>';
         $this->renderConnectionSettings();
         $this->renderPreflightPanel();
 
@@ -204,7 +206,7 @@ final class AdminController
     {
         $s = $this->settings;
         echo '<h3>Settings</h3>';
-        echo '<form method="post">';
+        echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="action" value="save_settings">';
         echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="60"></div>';
         echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="60"></div>';
@@ -226,6 +228,8 @@ final class AdminController
             echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
         }
         echo '</select></div>';
+        echo '<div class="edbw-form-inline"><label>Preflight Strict Mode</label><input type="checkbox" name="preflight_strict_mode" value="1" ' . ($s->getBool('preflight_strict_mode', true) ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Purge Data On Deactivate</label><input type="checkbox" name="purge_on_deactivate" value="1" ' . ($s->getBool('purge_on_deactivate', false) ? 'checked' : '') . '><span class="edbw-help">If enabled, all `mod_easydcim_bw_guard_*` tables and module settings are deleted on deactivate.</span></div>';
         echo '<button class="btn btn-primary" type="submit">Save Settings</button>';
         echo '</form>';
 
@@ -240,7 +244,7 @@ final class AdminController
         $current = Settings::loadFromDatabase();
         $payload = $current;
         $keys = array_keys(Settings::defaults());
-        $boolKeys = ['git_update_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode'];
+        $boolKeys = ['git_update_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate'];
         foreach ($keys as $key) {
             if (in_array($key, $boolKeys, true)) {
                 $payload[$key] = isset($_POST[$key]) ? '1' : '0';
@@ -482,6 +486,7 @@ final class AdminController
         echo '<button class="btn btn-default" type="submit">Add Package</button>';
         echo '</form>';
         $packages = Capsule::table('mod_easydcim_bw_guard_packages')->orderBy('id')->limit(100)->get();
+        echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th></tr></thead><tbody>';
         foreach ($packages as $pkg) {
             echo '<tr>';
@@ -493,18 +498,20 @@ final class AdminController
             echo '</tr>';
         }
         echo '</tbody></table>';
+        echo '</div>';
 
         echo '<h3>Service Overrides (Permanent)</h3>';
         echo '<form method="post" class="edbw-form-inline">';
         echo '<input type="hidden" name="action" value="save_override">';
         echo '<input type="number" min="1" name="ov_serviceid" placeholder="WHMCS Service ID" required>';
         echo '<input type="number" step="0.01" min="0" name="ov_quota_gb" placeholder="Base Quota GB">';
-        echo '<select name="ov_mode"><option value=\"\">Mode</option><option value=\"IN\">IN</option><option value=\"OUT\">OUT</option><option value=\"TOTAL\">TOTAL</option></select>';
-        echo '<select name="ov_action"><option value=\"\">Action</option><option value=\"disable_ports\">Disable Ports</option><option value=\"suspend\">Suspend</option><option value=\"both\">Both</option></select>';
+        echo '<select name="ov_mode"><option value="">Mode</option><option value="IN">IN</option><option value="OUT">OUT</option><option value="TOTAL">TOTAL</option></select>';
+        echo '<select name="ov_action"><option value="">Action</option><option value="disable_ports">Disable Ports</option><option value="suspend">Suspend</option><option value="both">Both</option></select>';
         echo '<button class="btn btn-default" type="submit">Save Override</button>';
         echo '</form>';
 
         $overrides = Capsule::table('mod_easydcim_bw_guard_service_overrides')->orderByDesc('id')->limit(200)->get();
+        echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>Service</th><th>Quota GB</th><th>Mode</th><th>Action</th><th>Updated</th></tr></thead><tbody>';
         foreach ($overrides as $ov) {
             echo '<tr>';
@@ -516,9 +523,11 @@ final class AdminController
             echo '</tr>';
         }
         echo '</tbody></table>';
+        echo '</div>';
 
         $purchases = $this->getPurchaseLogs();
         echo '<h3>Traffic Purchase Logs</h3>';
+        echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Service</th><th>Invoice</th><th>Cycle</th><th>Reset</th><th>Actor</th><th>Created</th></tr></thead><tbody>';
         foreach ($purchases as $row) {
             echo '<tr>';
@@ -532,9 +541,11 @@ final class AdminController
             echo '</tr>';
         }
         echo '</tbody></table>';
+        echo '</div>';
 
         $logs = $this->getEnforcementLogs();
         echo '<h3>Enforcement Logs</h3>';
+        echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>Level</th><th>Message</th><th>Time</th></tr></thead><tbody>';
         foreach ($logs as $log) {
             echo '<tr>';
@@ -544,6 +555,7 @@ final class AdminController
             echo '</tr>';
         }
         echo '</tbody></table>';
+        echo '</div>';
     }
 
     private function applyOneClickUpdate(): void

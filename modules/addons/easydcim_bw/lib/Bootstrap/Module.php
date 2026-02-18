@@ -44,13 +44,28 @@ final class Module
             $logger->log('INFO', 'module_activated', ['module' => 'easydcim_bw']);
             return ['status' => 'success', 'description' => 'Module activated with production-safe migrations.'];
         } catch (\Throwable $e) {
+            if (stripos($e->getMessage(), 'no active transaction') !== false) {
+                return ['status' => 'success', 'description' => 'Module activated. Migration completed with a non-fatal transaction warning.'];
+            }
             return ['status' => 'error', 'description' => 'Activation failed: ' . $e->getMessage()];
         }
     }
 
     public static function deactivate(): array
     {
-        return ['status' => 'success', 'description' => 'Module deactivated. Data kept intact.'];
+        $logger = new Logger();
+        try {
+            $settings = new Settings(Settings::loadFromDatabase());
+            if ($settings->getBool('purge_on_deactivate', false)) {
+                (new Migrator($logger))->purgeModuleData();
+                Capsule::table('tbladdonmodules')->where('module', 'easydcim_bw')->delete();
+                return ['status' => 'success', 'description' => 'Module deactivated and all module data was purged (as configured).'];
+            }
+
+            return ['status' => 'success', 'description' => 'Module deactivated. Data/settings were preserved.'];
+        } catch (\Throwable $e) {
+            return ['status' => 'error', 'description' => 'Deactivate failed: ' . $e->getMessage()];
+        }
     }
 
     public static function upgrade(array $vars): array

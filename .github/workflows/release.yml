@@ -50,7 +50,7 @@ jobs:
       - name: Build release notes from CHANGELOG
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          awk -v tag="$TAG" 'BEGIN { capture=0 } $0 ~ "^## \\[" tag "\\]" { capture=1; next } /^## \\[/ && capture==1 { exit } capture==1 { print }' CHANGELOG.md > RELEASE_NOTES.md
+          awk -v tag="$TAG" 'BEGIN { capture=0 } $0 ~ "^## \\[" tag "\\]" { capture=1; next } /^## \[/ && capture==1 { exit } capture==1 { print }' CHANGELOG.md > RELEASE_NOTES.md
           if [ ! -s RELEASE_NOTES.md ]; then
             echo "Release notes generation failed for ${TAG}."
             exit 1

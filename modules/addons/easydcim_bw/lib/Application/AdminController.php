@@ -54,9 +54,9 @@ final class AdminController
         $apiFailCount = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
         $updateLock = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
 
-        echo '<link rel="stylesheet" href="../modules/addons/easydcim_bandwidth_guard/assets/admin.css">';
+        echo '<link rel="stylesheet" href="../modules/addons/easydcim_bw/assets/admin.css">';
         echo '<div class="edbw-wrap">';
-        echo '<h2>EasyDCIM Bandwidth Guard</h2>';
+        echo '<h2>EasyDcim-BW</h2>';
         echo '<div class="edbw-card"><strong>Running Version:</strong> ' . htmlspecialchars($version['module_version']) . '</div>';
         echo '<div class="edbw-card"><strong>Commit:</strong> ' . htmlspecialchars($version['commit_sha']) . '</div>';
         echo '<div class="edbw-card"><strong>Update Status:</strong> ' . ($updateAvailable ? 'New commit available' : 'Up to date') . '</div>';

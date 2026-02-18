@@ -21,7 +21,7 @@ add_hook('AfterCronJob', 1, static function (): void {
     }
 
     $configRows = Capsule::table('tbladdonmodules')
-        ->where('module', 'easydcim_bandwidth_guard')
+        ->where('module', 'easydcim_bw')
         ->get(['setting', 'value']);
 
     $addonConfig = [];

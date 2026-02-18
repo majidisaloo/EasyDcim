@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="modules/addons/easydcim_bandwidth_guard/assets/client.css">
+<link rel="stylesheet" href="modules/addons/easydcim_bw/assets/client.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <div class="edbw-client-wrap">

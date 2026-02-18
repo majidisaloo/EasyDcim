@@ -1,4 +1,4 @@
-# EasyDCIM Bandwidth Guard (WHMCS Addon)
+# EasyDcim-BW (WHMCS Addon)
 
 Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git updates, and complete traffic purchase audit logs.
 
@@ -17,7 +17,7 @@ Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git u
 
 ## Install
 
-1. Copy `modules/addons/easydcim_bandwidth_guard` into WHMCS.
+1. Copy `modules/addons/easydcim_bw` into WHMCS.
 2. Activate from WHMCS Addon Modules.
 3. Configure API settings and managed PID/GID scope.
 4. Ensure `hooks.php` is loaded.

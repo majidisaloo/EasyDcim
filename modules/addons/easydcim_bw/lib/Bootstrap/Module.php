@@ -21,7 +21,7 @@ final class Module
         $version = Version::current(__DIR__ . '/../../');
 
         return [
-            'name' => 'EasyDCIM Bandwidth Guard',
+            'name' => 'EasyDcim-BW',
             'description' => 'Cycle-aware traffic control with EasyDCIM API, one-click git updates, and production-safe migrations.',
             'version' => $version['module_version'],
             'author' => 'Majid Isaloo',
@@ -60,7 +60,7 @@ final class Module
                 ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
             );
 
-            $logger->log('INFO', 'module_activated', ['module' => 'easydcim_bandwidth_guard']);
+            $logger->log('INFO', 'module_activated', ['module' => 'easydcim_bw']);
             return ['status' => 'success', 'description' => 'Module activated with production-safe migrations.'];
         } catch (\Throwable $e) {
             return ['status' => 'error', 'description' => 'Activation failed: ' . $e->getMessage()];
@@ -102,7 +102,7 @@ final class Module
 
         return [
             'pagetitle' => 'Traffic Usage',
-            'breadcrumb' => ['index.php?m=easydcim_bandwidth_guard' => 'Traffic Usage'],
+            'breadcrumb' => ['index.php?m=easydcim_bw' => 'Traffic Usage'],
             'templatefile' => 'clientarea',
             'requirelogin' => true,
             'forcessl' => false,

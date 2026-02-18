@@ -19,7 +19,7 @@ final class Logger
                 'created_at' => date('Y-m-d H:i:s'),
             ]);
         } catch (\Throwable $e) {
-            logModuleCall('easydcim_bandwidth_guard', 'log_fallback', $context, $e->getMessage(), [], ['token', 'Authorization']);
+            logModuleCall('easydcim_bw', 'log_fallback', $context, $e->getMessage(), [], ['token', 'Authorization']);
         }
     }
 }

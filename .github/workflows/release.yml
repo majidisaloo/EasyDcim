@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release zip
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ZIP="EasyDcim-BW-${TAG#v}.zip"
+          zip -r "$ZIP" modules/addons/easydcim_bw
+          echo "zip_name=$ZIP" >> "$GITHUB_OUTPUT"
+        id: pack
+
+      - name: Build release notes from CHANGELOG
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          awk -v tag="$TAG" '
+            $0 ~ "^## \\\\["tag"\\\\]" {capture=1; next}
+            $0 ~ "^## \\\\[" && capture==1 {exit}
+            capture==1 {print}
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "EasyDcim-BW ${TAG}" > RELEASE_NOTES.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: EasyDcim-BW ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: ${{ steps.pack.outputs.zip_name }}

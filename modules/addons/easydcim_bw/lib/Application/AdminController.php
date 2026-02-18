@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace EasyDcimBandwidthGuard\Application;
 
 use EasyDcimBandwidthGuard\Config\Settings;
+use EasyDcimBandwidthGuard\Infrastructure\EasyDcimClient;
 use EasyDcimBandwidthGuard\Infrastructure\Git\GitUpdateManager;
+use EasyDcimBandwidthGuard\Support\Crypto;
 use EasyDcimBandwidthGuard\Support\Logger;
 use EasyDcimBandwidthGuard\Support\Version;
 use WHMCS\Database\Capsule;
@@ -27,6 +29,7 @@ final class AdminController
     {
         $action = $_REQUEST['action'] ?? 'dashboard';
         $api = isset($_GET['api']) ? (string) $_GET['api'] : '';
+        $flash = [];
 
         if ($api === 'purchase_logs') {
             $this->json($this->getPurchaseLogs());
@@ -47,10 +50,17 @@ final class AdminController
         if ($action === 'save_override') {
             $this->saveOverride();
         }
+        if ($action === 'save_settings') {
+            $flash[] = $this->saveSettings();
+        }
+        if ($action === 'test_easydcim') {
+            $flash[] = $this->testEasyDcimConnection();
+        }
         if ($action === 'run_preflight') {
-            echo '<div class="alert alert-info">Preflight retest completed.</div>';
+            $flash[] = ['type' => 'info', 'text' => 'Preflight retest completed.'];
         }
 
+        $this->settings = new Settings(Settings::loadFromDatabase());
         $version = Version::current($this->moduleDir);
         $updateAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_available')->value('meta_value') === '1';
         $lastPollAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
@@ -60,12 +70,19 @@ final class AdminController
         echo '<link rel="stylesheet" href="../modules/addons/easydcim_bw/assets/admin.css">';
         echo '<div class="edbw-wrap">';
         echo '<h2>EasyDcim-BW</h2>';
+        foreach ($flash as $msg) {
+            echo '<div class="alert alert-' . htmlspecialchars($msg['type']) . '">' . htmlspecialchars($msg['text']) . '</div>';
+        }
         echo '<div class="edbw-card"><strong>Running Version:</strong> ' . htmlspecialchars($version['module_version']) . '</div>';
         echo '<div class="edbw-card"><strong>Commit:</strong> ' . htmlspecialchars($version['commit_sha']) . '</div>';
         echo '<div class="edbw-card"><strong>Update Status:</strong> ' . ($updateAvailable ? 'New commit available' : 'Up to date') . '</div>';
         echo '<div class="edbw-card"><strong>Last Poll:</strong> ' . htmlspecialchars($lastPollAt ?: 'N/A') . '</div>';
         echo '<div class="edbw-card"><strong>API Fail Count:</strong> ' . $apiFailCount . '</div>';
         echo '<div class="edbw-card"><strong>Update Lock:</strong> ' . ($updateLock ? 'Locked' : 'Free') . '</div>';
+        foreach ($this->buildRuntimeStatus() as $card) {
+            echo '<div class="edbw-card"><strong>' . htmlspecialchars($card['label']) . ':</strong> ' . htmlspecialchars($card['value']) . '</div>';
+        }
+        $this->renderConnectionSettings();
         $this->renderPreflightPanel();
 
         if ($updateAvailable) {
@@ -139,6 +156,111 @@ final class AdminController
         }
 
         return $checks;
+    }
+
+    private function buildRuntimeStatus(): array
+    {
+        $limitedCount = (int) Capsule::table('mod_easydcim_bw_guard_service_state')->where('last_status', 'limited')->count();
+        $syncedInLastHour = (int) Capsule::table('mod_easydcim_bw_guard_service_state')->where('last_check_at', '>=', date('Y-m-d H:i:s', time() - 3600))->count();
+        $suspendedOther = (int) Capsule::table('tblhosting as h')
+            ->leftJoin('mod_easydcim_bw_guard_service_state as s', 's.serviceid', '=', 'h.id')
+            ->where('h.domainstatus', 'Suspended')
+            ->where(static function ($q): void {
+                $q->whereNull('s.last_status')->orWhere('s.last_status', '!=', 'limited');
+            })
+            ->count();
+
+        $lastPoll = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
+        $cronOk = $lastPoll !== '' && strtotime($lastPoll) > time() - 3600;
+
+        return [
+            ['label' => 'Cron status', 'value' => $cronOk ? 'Connected' : 'Not running recently'],
+            ['label' => 'Traffic-limited services', 'value' => (string) $limitedCount],
+            ['label' => 'Synced (last 1h)', 'value' => (string) $syncedInLastHour],
+            ['label' => 'Suspended (other reasons)', 'value' => (string) $suspendedOther],
+        ];
+    }
+
+    private function renderConnectionSettings(): void
+    {
+        $s = $this->settings;
+        echo '<h3>Settings</h3>';
+        echo '<form method="post">';
+        echo '<input type="hidden" name="action" value="save_settings">';
+        echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="60"></div>';
+        echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="60"></div>';
+        echo '<div class="edbw-form-inline"><label>Managed PIDs</label><input type="text" name="managed_pids" value="' . htmlspecialchars($s->getString('managed_pids')) . '" size="40"></div>';
+        echo '<div class="edbw-form-inline"><label>Managed GIDs</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="40"></div>';
+        echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Poll Interval (min)</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Graph Cache (min)</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Enabled</label><input type="checkbox" name="autobuy_enabled" value="1" ' . ($s->getBool('autobuy_enabled') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Threshold GB</label><input type="number" min="1" name="autobuy_threshold_gb" value="' . (int) $s->getInt('autobuy_threshold_gb', 10) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Default Package ID</label><input type="number" min="0" name="autobuy_default_package_id" value="' . (int) $s->getInt('autobuy_default_package_id', 0) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Auto-Buy Max/Cycle</label><input type="number" min="1" name="autobuy_max_per_cycle" value="' . (int) $s->getInt('autobuy_max_per_cycle', 5) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Git Update Enabled</label><input type="checkbox" name="git_update_enabled" value="1" ' . ($s->getBool('git_update_enabled') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Git Origin URL</label><input type="text" name="git_origin_url" value="' . htmlspecialchars($s->getString('git_origin_url')) . '" size="60"></div>';
+        echo '<div class="edbw-form-inline"><label>Git Branch</label><input type="text" name="git_branch" value="' . htmlspecialchars($s->getString('git_branch', 'main')) . '" size="20"></div>';
+        echo '<div class="edbw-form-inline"><label>Update Mode</label><select name="update_mode">';
+        foreach (['notify', 'check_oneclick', 'auto'] as $mode) {
+            echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
+        }
+        echo '</select></div>';
+        echo '<button class="btn btn-primary" type="submit">Save Settings</button>';
+        echo '</form>';
+
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="action" value="test_easydcim">';
+        echo '<button class="btn btn-default" type="submit">Test EasyDCIM Connection</button>';
+        echo '</form>';
+    }
+
+    private function saveSettings(): array
+    {
+        $current = Settings::loadFromDatabase();
+        $payload = $current;
+        $keys = array_keys(Settings::defaults());
+        $boolKeys = ['git_update_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode'];
+        foreach ($keys as $key) {
+            if (in_array($key, $boolKeys, true)) {
+                $payload[$key] = isset($_POST[$key]) ? '1' : '0';
+                continue;
+            }
+            if (!isset($_POST[$key])) {
+                continue;
+            }
+            $payload[$key] = trim((string) $_POST[$key]);
+        }
+
+        $newToken = trim((string) ($_POST['easydcim_api_token'] ?? ''));
+        if ($newToken !== '') {
+            $payload['easydcim_api_token'] = function_exists('encrypt') ? encrypt($newToken) : $newToken;
+        } else {
+            $payload['easydcim_api_token'] = $current['easydcim_api_token'] ?? '';
+        }
+
+        Settings::saveToDatabase($payload);
+        return ['type' => 'success', 'text' => 'Settings saved successfully.'];
+    }
+
+    private function testEasyDcimConnection(): array
+    {
+        try {
+            $baseUrl = $this->settings->getString('easydcim_base_url');
+            $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+            if ($baseUrl === '' || $token === '') {
+                return ['type' => 'warning', 'text' => 'Base URL or API token is missing.'];
+            }
+
+            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger);
+            if ($client->ping()) {
+                return ['type' => 'success', 'text' => 'EasyDCIM connection is OK.'];
+            }
+
+            return ['type' => 'warning', 'text' => 'EasyDCIM is reachable but response is not healthy.'];
+        } catch (\Throwable $e) {
+            return ['type' => 'danger', 'text' => 'EasyDCIM test failed: ' . $e->getMessage()];
+        }
     }
 
     private function renderTables(): void

@@ -25,26 +25,7 @@ final class Module
             'description' => 'Traffic control for EasyDCIM with safe migrations and Git updates.',
             'version' => $version['module_version'],
             'author' => 'Majid Isaloo',
-            'fields' => [
-                'easydcim_base_url' => ['FriendlyName' => 'EasyDCIM Base URL', 'Type' => 'text', 'Size' => '80', 'Default' => ''],
-                'easydcim_api_token' => ['FriendlyName' => 'Admin API Token', 'Type' => 'password', 'Size' => '80', 'Default' => ''],
-                'use_impersonation' => ['FriendlyName' => 'Use Impersonation', 'Type' => 'yesno', 'Description' => 'Enable X-Impersonate-User header'],
-                'managed_pids' => ['FriendlyName' => 'Managed Product IDs', 'Type' => 'text', 'Size' => '80', 'Description' => 'Comma-separated PID list'],
-                'managed_gids' => ['FriendlyName' => 'Managed Group IDs', 'Type' => 'text', 'Size' => '80', 'Description' => 'Comma-separated GID list'],
-                'poll_interval_minutes' => ['FriendlyName' => 'Poll Interval (min)', 'Type' => 'text', 'Size' => '10', 'Default' => '15'],
-                'graph_cache_minutes' => ['FriendlyName' => 'Graph Cache (min)', 'Type' => 'text', 'Size' => '10', 'Default' => '30'],
-                'autobuy_enabled' => ['FriendlyName' => 'Auto-Buy Enabled', 'Type' => 'yesno'],
-                'autobuy_threshold_gb' => ['FriendlyName' => 'Auto-Buy Threshold GB', 'Type' => 'text', 'Size' => '10', 'Default' => '10'],
-                'autobuy_default_package_id' => ['FriendlyName' => 'Auto-Buy Default Package ID', 'Type' => 'text', 'Size' => '10', 'Default' => '0'],
-                'autobuy_max_per_cycle' => ['FriendlyName' => 'Auto-Buy Max/Cycle', 'Type' => 'text', 'Size' => '10', 'Default' => '5'],
-                'git_update_enabled' => ['FriendlyName' => 'Git Update Check Enabled', 'Type' => 'yesno', 'Description' => 'Check for new commits during cron'],
-                'git_origin_url' => ['FriendlyName' => 'Git Origin URL', 'Type' => 'text', 'Size' => '120', 'Default' => ''],
-                'git_branch' => ['FriendlyName' => 'Git Branch', 'Type' => 'text', 'Size' => '20', 'Default' => 'main'],
-                'update_channel' => ['FriendlyName' => 'Update Channel', 'Type' => 'dropdown', 'Options' => 'stable,commit', 'Default' => 'commit'],
-                'update_check_interval_minutes' => ['FriendlyName' => 'Update Check Interval (min)', 'Type' => 'text', 'Size' => '10', 'Default' => '30'],
-                'update_mode' => ['FriendlyName' => 'Update Mode', 'Type' => 'dropdown', 'Options' => 'notify,check_oneclick,auto', 'Default' => 'check_oneclick'],
-                'preflight_strict_mode' => ['FriendlyName' => 'Preflight Strict Mode', 'Type' => 'yesno', 'Description' => 'Block risky update actions'],
-            ],
+            'fields' => [],
         ];
     }
 
@@ -85,7 +66,7 @@ final class Module
 
     public static function output(array $vars): void
     {
-        $settings = new Settings($vars);
+        $settings = new Settings(Settings::loadFromDatabase());
         $logger = new Logger();
         $controller = new AdminController($settings, $logger, __DIR__ . '/../../');
         $controller->handle($vars);
@@ -93,7 +74,7 @@ final class Module
 
     public static function clientArea(array $vars): array
     {
-        $settings = new Settings($vars);
+        $settings = new Settings(Settings::loadFromDatabase());
         $logger = new Logger();
         $controller = new ClientController($settings, $logger);
 

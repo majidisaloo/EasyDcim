@@ -6,11 +6,20 @@ namespace EasyDcimBandwidthGuard\Support;
 
 final class Version
 {
+    private const FALLBACK_VERSION = '1.12';
+
     public static function current(string $moduleDir): array
     {
-        $sha = self::runGit($moduleDir, 'rev-parse --short HEAD') ?? 'n/a';
-        $countRaw = self::runGit($moduleDir, 'rev-list --count HEAD') ?? '1';
-        $count = ctype_digit($countRaw) ? max(1, (int) $countRaw) : 1;
+        $sha = self::runGit($moduleDir, 'rev-parse --short HEAD') ?? 'release';
+        $countRaw = self::runGit($moduleDir, 'rev-list --count HEAD');
+        if ($countRaw === null || !ctype_digit($countRaw)) {
+            return [
+                'module_version' => self::FALLBACK_VERSION,
+                'commit_sha' => $sha,
+                'commit_unix_ts' => time(),
+            ];
+        }
+        $count = max(1, (int) $countRaw);
 
         $major = intdiv($count - 1, 100) + 1;
         $minor = $count % 100;

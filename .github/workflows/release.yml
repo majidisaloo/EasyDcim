@@ -16,6 +16,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate version/tag and changelog section
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE_VERSION="$(tr -d '[:space:]' < modules/addons/easydcim_bw/VERSION)"
+          if [ "$TAG" != "$FILE_VERSION" ]; then
+            echo "Tag version ($TAG) must equal modules/addons/easydcim_bw/VERSION ($FILE_VERSION)"
+            exit 1
+          fi
+          if ! grep -q "^## \[$TAG\]" CHANGELOG.md; then
+            echo "CHANGELOG entry for version $TAG is missing."
+            exit 1
+          fi
+
+      - name: PHP lint
+        run: |
+          find modules/addons/easydcim_bw -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Verify docs updated
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          grep -q "Current module version: \`$TAG\`" README.md
+          grep -q "Current version: \`$TAG\`" modules/addons/easydcim_bw/README.md
+
       - name: Build release zip
         run: |
           TAG="${GITHUB_REF_NAME}"
@@ -27,9 +50,10 @@ jobs:
       - name: Build release notes from CHANGELOG
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          awk -v tag="$TAG" 'BEGIN { capture=0 } $0 ~ "^## \\[" tag "\\]" { capture=1; next } /^## \\[/ && capture==1 { exit } capture==1 { print }' CHANGELOG.md > RELEASE_NOTES.md || true
+          awk -v tag="$TAG" 'BEGIN { capture=0 } $0 ~ "^## \\[" tag "\\]" { capture=1; next } /^## \\[/ && capture==1 { exit } capture==1 { print }' CHANGELOG.md > RELEASE_NOTES.md
           if [ ! -s RELEASE_NOTES.md ]; then
-            echo "EasyDcim-BW ${TAG}" > RELEASE_NOTES.md
+            echo "Release notes generation failed for ${TAG}."
+            exit 1
           fi
 
       - name: Create GitHub Release

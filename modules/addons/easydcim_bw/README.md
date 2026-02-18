@@ -2,6 +2,8 @@
 
 Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git updates, and complete traffic purchase audit logs.
 
+Current version: `1.16`
+
 ## Key Features
 
 - Cycle-aware traffic calculation from `nextduedate` and billing cycle.

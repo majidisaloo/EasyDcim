@@ -2,6 +2,27 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.16] - 2026-02-19
+### Added
+- New safe deactivate option: `Purge Data On Deactivate` in addon dashboard settings.
+- Explicit `VERSION` file in addon path to keep version stable on non-git/manual deployments.
+### Changed
+- Deactivate now preserves module data/settings by default for safe manual file replacement.
+- Admin dashboard UI refreshed for cleaner cards/forms/tables and better readability.
+- Addon README aligned with release-based update flow and deactivate behavior.
+### Fixed
+- Activation now tolerates non-fatal `There is no active transaction` warning path on some WHMCS environments.
+
+## [1.15] - 2026-02-19
+### Added
+- Manual GitHub release update path without `shell_exec` (download latest release zip and apply addon files).
+### Changed
+- Update check/source shifted to GitHub releases for compatibility with shared hosting limits.
+
+## [1.14] - 2026-02-19
+### Fixed
+- Hardened GitHub release workflow reliability and deployment version fallback behavior.
+
 ## [1.13] - 2026-02-19
 ### Changed
 - Moved addon settings UI from WHMCS Addon Modules config into module dashboard.

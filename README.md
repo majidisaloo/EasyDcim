@@ -2,6 +2,8 @@
 
 Single WHMCS addon module for EasyDCIM bandwidth control.
 
+Current module version: `1.16`
+
 ## Repository Layout
 
 This repository is intentionally laid out for direct extraction into WHMCS `public_html`:

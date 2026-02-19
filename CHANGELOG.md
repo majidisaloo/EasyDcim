@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.28] - 2026-02-19
+### Fixed
+- Service list parsing now supports nested payload formats (`data.items`, `data.data`, `result.items`, `result.data`) to avoid empty-list false negatives.
+- Added fallback servers loading via impersonated client service listing when direct admin-token client list returns empty.
+### Added
+- API call logs now include full request URL for easier endpoint-path validation.
+- Servers tab now shows an explicit hint when API list is empty despite configured connection.
+- Servers diagnostics now log list-summary events for direct/impersonated fetch attempts.
+
 ## [1.27] - 2026-02-19
 ### Fixed
 - Servers tab now supports wider custom-field aliases (`Order ID`, `Server ID`, `Service ID`) so mapped data is detected more reliably.

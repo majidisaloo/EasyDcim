@@ -433,6 +433,46 @@ final class AdminController
                 $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
                 $resp = $client->listServices();
                 $easyServices = $this->extractServiceItems((array) ($resp['data'] ?? []));
+                $this->logger->log('INFO', 'servers_list_services_summary', [
+                    'mode' => 'direct',
+                    'http_code' => (int) ($resp['http_code'] ?? 0),
+                    'items' => count($easyServices),
+                ]);
+                if (empty($easyServices) && $this->settings->getBool('use_impersonation', false)) {
+                    $merged = [];
+                    $seen = [];
+                    foreach ($this->getScopedClientEmails(40) as $email) {
+                        try {
+                            $r = $client->listServices($email);
+                            $items = $this->extractServiceItems((array) ($r['data'] ?? []));
+                            $this->logger->log('INFO', 'servers_list_services_summary', [
+                                'mode' => 'impersonated',
+                                'impersonate' => $email,
+                                'http_code' => (int) ($r['http_code'] ?? 0),
+                                'items' => count($items),
+                            ]);
+                            foreach ($items as $item) {
+                                $k = trim((string) ($item['service_id'] ?? ''));
+                                if ($k === '') {
+                                    $k = md5(json_encode($item, JSON_UNESCAPED_SLASHES));
+                                }
+                                if (isset($seen[$k])) {
+                                    continue;
+                                }
+                                $seen[$k] = true;
+                                $merged[] = $item;
+                            }
+                        } catch (\Throwable $e) {
+                            $this->logger->log('WARNING', 'servers_list_services_impersonate_failed', [
+                                'impersonate' => $email,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
+                    if (!empty($merged)) {
+                        $easyServices = $merged;
+                    }
+                }
             } catch (\Throwable $e) {
                 $this->logger->log('WARNING', 'servers_tab_list_failed', ['error' => $e->getMessage()]);
             }
@@ -454,6 +494,9 @@ final class AdminController
             echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_missing')) . '</div>';
         } else {
             echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_api_loaded')) . ': ' . count($easyServices) . '</p>';
+            if (count($easyServices) === 0) {
+                echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_empty_hint')) . '</div>';
+            }
         }
         echo '</div>';
 
@@ -1622,6 +1665,25 @@ final class AdminController
         return $out;
     }
 
+    private function getScopedClientEmails(int $limit = 40): array
+    {
+        $q = Capsule::table('tblhosting as h')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
+            ->whereIn('h.domainstatus', ['Active', 'Suspended'])
+            ->select(['c.email']);
+        $this->applyScopeFilter($q);
+        return $q->whereNotNull('c.email')
+            ->where('c.email', '!=', '')
+            ->limit(max(1, $limit))
+            ->pluck('c.email')
+            ->map(static fn ($e): string => trim((string) $e))
+            ->filter(static fn ($e): bool => $e !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     private function getServiceCustomFieldValues(array $serviceIds): array
     {
         if (empty($serviceIds)) {
@@ -1676,9 +1738,21 @@ final class AdminController
     {
         $items = [];
         if (isset($payload['data']) && is_array($payload['data'])) {
-            $items = $payload['data'];
+            if (isset($payload['data']['items']) && is_array($payload['data']['items'])) {
+                $items = $payload['data']['items'];
+            } elseif (isset($payload['data']['data']) && is_array($payload['data']['data'])) {
+                $items = $payload['data']['data'];
+            } else {
+                $items = $payload['data'];
+            }
         } elseif (isset($payload['result']) && is_array($payload['result'])) {
-            $items = $payload['result'];
+            if (isset($payload['result']['items']) && is_array($payload['result']['items'])) {
+                $items = $payload['result']['items'];
+            } elseif (isset($payload['result']['data']) && is_array($payload['result']['data'])) {
+                $items = $payload['result']['data'];
+            } else {
+                $items = $payload['result'];
+            }
         } elseif (array_keys($payload) === range(0, count($payload) - 1)) {
             $items = $payload;
         } else {
@@ -1889,6 +1963,7 @@ final class AdminController
             'servers_tab_title' => 'سرورها و سرویس‌های EasyDCIM',
             'servers_api_missing' => 'برای نمایش لیست سرورهای EasyDCIM ابتدا Base URL و API Token را تنظیم کنید.',
             'servers_api_loaded' => 'تعداد آیتم دریافتی از EasyDCIM',
+            'servers_api_empty_hint' => 'لیست API خالی است. اگر توکن ادمین استفاده می‌کنید، حالت Unrestricted را روشن کنید یا Service/Order/Server ID را در سرویس‌های WHMCS تکمیل کنید.',
             'servers_assigned' => 'سرویس‌های واگذار شده به مشتری',
             'servers_unassigned' => 'سرویس‌های آزاد (بدون اتصال به WHMCS)',
             'test' => 'تست',
@@ -2064,6 +2139,7 @@ final class AdminController
             'servers_tab_title' => 'EasyDCIM Servers and Services',
             'servers_api_missing' => 'Configure EasyDCIM Base URL and API token to load server list.',
             'servers_api_loaded' => 'Items loaded from EasyDCIM',
+            'servers_api_empty_hint' => 'API list is empty. If you use an admin token, enable Unrestricted mode or fill Service/Order/Server IDs on WHMCS services.',
             'servers_assigned' => 'Assigned Services (WHMCS mapped)',
             'servers_unassigned' => 'Unassigned Services (not mapped to WHMCS)',
             'test' => 'Test',

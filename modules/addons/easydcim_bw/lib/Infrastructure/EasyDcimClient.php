@@ -152,6 +152,7 @@ final class EasyDcimClient
 
         $this->logger->log('INFO', 'easydcim_api_call', [
             'method' => $method,
+            'url' => $url,
             'path' => $path,
             'http_code' => $httpCode,
             'duration_ms' => $durationMs,

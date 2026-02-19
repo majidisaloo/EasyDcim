@@ -907,12 +907,18 @@ final class AdminController
                 $checks[] = ['name' => 'Custom field: ' . $field, 'ok' => false, 'level' => 'fail', 'detail' => $this->t('hc_no_scope')];
                 continue;
             }
-            $level = $configured === $totalScoped ? 'ok' : ($configured > 0 ? 'warn' : 'fail');
+            if ($field === 'easydcim_service_id') {
+                $level = $configured === $totalScoped ? 'ok' : ($configured > 0 ? 'warn' : 'warn');
+                $detail = $configured . '/' . $totalScoped . ' ' . ($this->isFa ? 'محصول در محدوده تنظیم شده' : 'scoped products configured') . ' (' . $this->t('hc_optional') . ')';
+            } else {
+                $level = $configured === $totalScoped ? 'ok' : ($configured > 0 ? 'warn' : 'fail');
+                $detail = $configured . '/' . $totalScoped . ' ' . ($this->isFa ? 'محصول در محدوده تنظیم شده' : 'scoped products configured');
+            }
             $checks[] = [
                 'name' => 'Custom field: ' . $field,
                 'ok' => $level !== 'fail',
                 'level' => $level,
-                'detail' => $configured . '/' . $totalScoped . ' ' . ($this->isFa ? 'محصول در محدوده تنظیم شده' : 'scoped products configured'),
+                'detail' => $detail,
             ];
         }
 
@@ -1245,7 +1251,23 @@ final class AdminController
 
             if ($resolvedServiceId !== '') {
                 $mode = 'service_id';
-                $response = $client->ports($resolvedServiceId, true, $email);
+                $response = $client->ports($resolvedServiceId, true, $email, false);
+                $codeFirst = (int) ($response['http_code'] ?? 0);
+                if ($codeFirst === 401 || $codeFirst === 403) {
+                    $fallbackClient = new EasyDcimClient(
+                        $baseUrl,
+                        $token,
+                        false,
+                        $this->logger,
+                        $this->proxyConfig()
+                    );
+                    $fallbackResp = $fallbackClient->ports($resolvedServiceId, true, null, false);
+                    $codeFallback = (int) ($fallbackResp['http_code'] ?? 0);
+                    if ($codeFallback >= 200 && $codeFallback < 300) {
+                        $response = $fallbackResp;
+                        $mode = 'service_id_fallback_no_impersonation';
+                    }
+                }
             }
             $code = (int) ($response['http_code'] ?? 0);
             $err = trim((string) ($response['error'] ?? ''));
@@ -1272,6 +1294,9 @@ final class AdminController
 
             if ($mode === 'none' && $err === '') {
                 $err = $this->isFa ? 'Service ID از روی Order ID پیدا نشد' : 'Service ID was not resolved from order';
+                $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $err . ')';
+            } elseif (($code === 401 || $code === 403) && $err === '') {
+                $err = $this->isFa ? 'عدم دسترسی به endpoint پورت‌ها با توکن/حالت فعلی' : 'Access denied for ports endpoint with current token/mode';
                 $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $err . ')';
             } elseif ($ok) {
                 if ($networkPorts > 0) {
@@ -2529,6 +2554,7 @@ final class AdminController
             'hc_found' => 'موجود',
             'hc_available' => 'موجود',
             'hc_missing' => 'ناموجود',
+            'hc_optional' => 'اختیاری',
             'preflight_checks' => 'بررسی‌های پیش از اجرا',
             'preflight_retested' => 'بررسی پیش از اجرا دوباره انجام شد.',
             'health_cron_title' => 'وضعیت کرون',
@@ -2715,6 +2741,7 @@ final class AdminController
             'hc_found' => 'Found',
             'hc_available' => 'Available',
             'hc_missing' => 'Missing',
+            'hc_optional' => 'optional',
             'preflight_checks' => 'Preflight Checks',
             'preflight_retested' => 'Preflight retest completed.',
             'health_cron_title' => 'Cron Status',

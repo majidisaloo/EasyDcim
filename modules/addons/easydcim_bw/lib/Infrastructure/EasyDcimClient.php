@@ -35,10 +35,10 @@ final class EasyDcimClient
         ], $impersonateUser);
     }
 
-    public function ports(string $serviceId, bool $withTraffic = false, ?string $impersonateUser = null): array
+    public function ports(string $serviceId, bool $withTraffic = false, ?string $impersonateUser = null, bool $throwOnError = true): array
     {
         $query = $withTraffic ? '?with_traffic=true' : '';
-        return $this->request('GET', '/api/v3/client/services/' . rawurlencode($serviceId) . '/ports' . $query, null, $impersonateUser);
+        return $this->request('GET', '/api/v3/client/services/' . rawurlencode($serviceId) . '/ports' . $query, null, $impersonateUser, $throwOnError);
     }
 
     public function portsByServer(string $serverId, bool $withTraffic = false, ?string $impersonateUser = null): array

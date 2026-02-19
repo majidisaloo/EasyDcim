@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.43] - 2026-02-19
+### Fixed
+- `Servers -> Test` no longer throws hard exception on `403/401` for `client/services/{id}/ports`; response is handled gracefully with explicit permission message.
+- Added automatic fallback port test without impersonation when first attempt is denied.
+- Health Check now treats `easydcim_service_id` as optional (warning only), while keeping `order_id/server_id` as primary required mapping identifiers.
+
 ## [1.42] - 2026-02-19
 ### Fixed
 - `Servers -> Test` now stores and shows per-service port test result directly in the table, so `Ports Status` is no longer stuck on `No data` after a successful test.

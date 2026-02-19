@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.81] - 2026-02-19
+### Fixed
+- Added robust batch-test auto-recovery in Servers tab:
+  - detects stalled progress (`done` not moving)
+  - automatically falls back to normal form submit (`Continue`) when AJAX polling stalls
+  - keeps queue moving even under admin JS/plugin/theme conflicts.
+
 ## [1.80] - 2026-02-19
 ### Fixed
 - Servers batch runner now auto-resumes reliably on page load when progress state exists (`done < total`) even if stale `running` flag is false.

@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.39] - 2026-02-19
+### Fixed
+- Preflight custom-field checks are now scope-aware with counts per field (`configured/total`) and warning state for partial coverage.
+- Servers table alignment improved: headers and row values are centered consistently.
+- Service extraction now reads nested order IDs (`order.id` / `order.order_id`) to improve mapping.
+- Updater now validates write access earlier and reports directory/file permission issues more explicitly.
+### Changed
+- Scoped hosting mapping now attempts `Order ID -> Service ID` resolution even when port lookup is disabled, with per-order cache to avoid repeated API calls.
+
 ## [1.38] - 2026-02-19
 ### Fixed
 - `Servers -> Test` no longer returns ambiguous `HTTP 0` when service ID is missing; now reports explicit unresolved-service reason.

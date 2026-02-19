@@ -223,6 +223,11 @@
   color: #991b1b;
 }
 
+.edbw-badge.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .edbw-wrap .btn-primary {
   background: #0f766e;
   border-color: #0f766e;
@@ -247,6 +252,12 @@
 .edbw-table-wrap label {
   font-size: 12px;
   margin-right: 6px;
+}
+
+.edbw-table-center th,
+.edbw-table-center td {
+  text-align: center !important;
+  vertical-align: middle !important;
 }
 
 @media (max-width: 900px) {

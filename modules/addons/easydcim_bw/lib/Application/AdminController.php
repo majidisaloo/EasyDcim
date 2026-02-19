@@ -460,7 +460,7 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
         foreach ($services as $svc) {
             echo '<tr>';
             echo '<td><a href="' . htmlspecialchars((string) $svc['service_url']) . '">#' . (int) $svc['serviceid'] . '</a></td>';
@@ -483,7 +483,7 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_unassigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
         foreach ($unassigned as $item) {
             echo '<tr>';
             echo '<td>' . htmlspecialchars((string) ($item['service_id'] ?? '-')) . '</td>';
@@ -722,7 +722,7 @@ final class AdminController
     private function renderPreflightPanel(): void
     {
         $checks = $this->buildHealthChecks();
-        $failed = array_filter($checks, static fn (array $c): bool => !$c['ok']);
+        $failed = array_filter($checks, static fn (array $c): bool => ((string) ($c['level'] ?? ($c['ok'] ? 'ok' : 'fail')) === 'fail'));
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('preflight_checks')) . '</h3>';
@@ -734,9 +734,16 @@ final class AdminController
         echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('check')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('details')) . '</th></tr></thead><tbody>';
         foreach ($checks as $check) {
+            $level = (string) ($check['level'] ?? ($check['ok'] ? 'ok' : 'fail'));
+            $badge = '<span class="edbw-badge fail">' . htmlspecialchars($this->t('missing_fail')) . '</span>';
+            if ($level === 'ok') {
+                $badge = '<span class="edbw-badge ok">OK</span>';
+            } elseif ($level === 'warn') {
+                $badge = '<span class="edbw-badge warn">' . htmlspecialchars($this->isFa ? 'هشدار' : 'Warning') . '</span>';
+            }
             echo '<tr>';
             echo '<td>' . htmlspecialchars($check['name']) . '</td>';
-            echo '<td>' . ($check['ok'] ? '<span class="edbw-badge ok">OK</span>' : '<span class="edbw-badge fail">' . htmlspecialchars($this->t('missing_fail')) . '</span>') . '</td>';
+            echo '<td>' . $badge . '</td>';
             echo '<td>' . htmlspecialchars($check['detail']) . '</td>';
             echo '</tr>';
         }
@@ -860,17 +867,31 @@ final class AdminController
         $scopeSet = !empty($this->settings->getCsvList('managed_pids')) || !empty($this->settings->getCsvList('managed_gids'));
         $checks[] = ['name' => $this->t('hc_scope'), 'ok' => $scopeSet, 'detail' => $scopeSet ? $this->t('hc_configured') : $this->t('hc_no_scope')];
 
-        $requiredCustomFields = ['easydcim_service_id', 'easydcim_order_id', 'easydcim_server_id'];
-        $existing = Capsule::table('tblcustomfields')
-            ->where('type', 'product')
-            ->pluck('fieldname')
-            ->map(static fn ($n): string => strtolower(trim(explode('|', (string) $n)[0])))
-            ->all();
-        foreach ($requiredCustomFields as $field) {
+        $scopedProducts = $this->getScopedProducts();
+        $totalScoped = count($scopedProducts);
+        $cfCount = ['easydcim_service_id' => 0, 'easydcim_order_id' => 0, 'easydcim_server_id' => 0];
+        foreach ($scopedProducts as $p) {
+            if (!empty($p['cf_service'])) {
+                $cfCount['easydcim_service_id']++;
+            }
+            if (!empty($p['cf_order'])) {
+                $cfCount['easydcim_order_id']++;
+            }
+            if (!empty($p['cf_server'])) {
+                $cfCount['easydcim_server_id']++;
+            }
+        }
+        foreach ($cfCount as $field => $configured) {
+            if ($totalScoped <= 0) {
+                $checks[] = ['name' => 'Custom field: ' . $field, 'ok' => false, 'level' => 'fail', 'detail' => $this->t('hc_no_scope')];
+                continue;
+            }
+            $level = $configured === $totalScoped ? 'ok' : ($configured > 0 ? 'warn' : 'fail');
             $checks[] = [
                 'name' => 'Custom field: ' . $field,
-                'ok' => in_array($field, $existing, true),
-                'detail' => in_array($field, $existing, true) ? $this->t('hc_found') : $this->t('hc_missing'),
+                'ok' => $level !== 'fail',
+                'level' => $level,
+                'detail' => $configured . '/' . $totalScoped . ' ' . ($this->isFa ? 'محصول در محدوده تنظیم شده' : 'scoped products configured'),
             ];
         }
 
@@ -1314,6 +1335,13 @@ final class AdminController
             if (!class_exists(\ZipArchive::class)) {
                 throw new \RuntimeException('ZipArchive extension is required.');
             }
+            $addonDir = realpath($this->moduleDir);
+            if ($addonDir === false || !is_dir($addonDir)) {
+                throw new \RuntimeException('Addon path is not accessible.');
+            }
+            if (!is_writable($addonDir)) {
+                throw new \RuntimeException('Addon directory is not writable: ' . $addonDir);
+            }
 
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
                 ['meta_key' => 'update_in_progress'],
@@ -1484,9 +1512,13 @@ final class AdminController
                     throw new \RuntimeException('Cannot create directory: ' . $dir);
                 }
             }
+            @chmod($dir, 0755);
             $content = $zip->getFromIndex($i);
             if ($content === false) {
                 continue;
+            }
+            if (is_file($target) && !is_writable($target)) {
+                @chmod($target, 0644);
             }
             if (file_put_contents($target, $content) === false) {
                 $zip->close();
@@ -1712,9 +1744,13 @@ final class AdminController
         $baseUrl = $this->settings->getString('easydcim_base_url');
         $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
         $apiAvailable = $baseUrl !== '' && $token !== '';
-        $client = null;
-        if ($apiAvailable && $withPortLookup) {
-            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+        $resolverClient = null;
+        $portClient = null;
+        if ($apiAvailable) {
+            $resolverClient = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+            if ($withPortLookup) {
+                $portClient = $resolverClient;
+            }
         }
         $easyByIp = [];
         foreach ($easyServiceItems as $item) {
@@ -1741,6 +1777,7 @@ final class AdminController
                 $easyByOrder[$ord] = $item;
             }
         }
+        $resolvedFromOrder = [];
 
         $out = [];
         foreach ($rows as $r) {
@@ -1756,6 +1793,14 @@ final class AdminController
                 $resolvedService = (string) ($easyByOrder[$resolvedOrder]['service_id'] ?? '');
                 if ($resolvedServer === '') {
                     $resolvedServer = (string) ($easyByOrder[$resolvedOrder]['server_id'] ?? '');
+                }
+            }
+            if ($resolvedService === '' && $resolvedOrder !== '' && $resolverClient instanceof EasyDcimClient) {
+                if (array_key_exists($resolvedOrder, $resolvedFromOrder)) {
+                    $resolvedService = (string) $resolvedFromOrder[$resolvedOrder];
+                } else {
+                    $resolvedService = $this->resolveServiceIdFromOrder($resolverClient, $resolvedOrder);
+                    $resolvedFromOrder[$resolvedOrder] = $resolvedService;
                 }
             }
             if ($resolvedService !== '' && isset($easyByService[$resolvedService]) && $resolvedServer === '') {
@@ -1779,14 +1824,11 @@ final class AdminController
             $networkPortsUp = 0;
             $networkTrafficTotal = 0.0;
 
-            if ($client instanceof EasyDcimClient) {
+            if ($portClient instanceof EasyDcimClient) {
                 try {
                     $email = (string) ($r->email ?? '');
-                    if ($resolvedService === '' && $resolvedOrder !== '') {
-                        $resolvedService = $this->resolveServiceIdFromOrder($client, $resolvedOrder);
-                    }
                     if ($resolvedService !== '') {
-                        $ports = $client->ports($resolvedService, true, $email);
+                        $ports = $portClient->ports($resolvedService, true, $email);
                     } else {
                         $ports = ['data' => []];
                     }
@@ -1975,7 +2017,7 @@ final class AdminController
             $normalized[] = [
                 'service_id' => (string) ($row['id'] ?? $row['service_id'] ?? ''),
                 'server_id' => $relatedId,
-                'order_id' => (string) ($row['order_id'] ?? $row['orderId'] ?? ''),
+                'order_id' => (string) ($row['order_id'] ?? $row['orderId'] ?? (($row['order']['id'] ?? $row['order']['order_id'] ?? ''))),
                 'ip' => $ip,
                 'status' => (string) ($row['status'] ?? $row['state'] ?? ''),
                 'is_up' => $isUp,

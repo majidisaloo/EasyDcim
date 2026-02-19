@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.75] - 2026-02-19
+### Fixed
+- Batch service test now retries `client/services/{id}/ports` without impersonation on HTTP `401/403/422` (same as manual test path).
+- Fixes warnings like `Impersonated user account is inactive` during `Test All` when impersonated EasyDCIM user is disabled.
+
 ## [1.74] - 2026-02-19
 ### Fixed
 - Fixed stuck batch state in Servers tab where progress could remain (e.g. `1/163`) while `Stop/Reset` controls disappeared.

@@ -2,6 +2,10 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.58] - 2026-02-19
+### Fixed
+- Fixed order-details port parsing path where fallback payload was wrapped as `{ports: [...]}` but parser only read `data/result`; this caused false `No ports found` despite resolved order ports.
+
 ## [1.57] - 2026-02-19
 ### Fixed
 - `Test All` bulk flow optimized to avoid heavy fallback calls in batch mode (no slow server-scan/order-scan paths during bulk checks).

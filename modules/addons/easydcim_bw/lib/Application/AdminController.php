@@ -3091,6 +3091,8 @@ final class AdminController
         $items = [];
         if (isset($payload['data']) && is_array($payload['data'])) {
             $items = $payload['data'];
+        } elseif (isset($payload['ports']) && is_array($payload['ports'])) {
+            $items = $payload['ports'];
         } elseif (isset($payload['result']) && is_array($payload['result'])) {
             $items = $payload['result'];
         } elseif (array_keys($payload) === range(0, count($payload) - 1)) {

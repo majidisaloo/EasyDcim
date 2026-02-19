@@ -15,4 +15,5 @@ final class Tables
     public const UPDATE_LOG = 'mod_easydcim_bw_guard_update_log';
     public const PACKAGES = 'mod_easydcim_bw_guard_packages';
     public const SERVICE_OVERRIDES = 'mod_easydcim_bw_guard_service_overrides';
+    public const CLIENT_PREFS = 'mod_easydcim_bw_guard_client_prefs';
 }

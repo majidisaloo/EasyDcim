@@ -46,15 +46,22 @@
 
 .edbw-buy-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
 
-.edbw-buy-row select {
+.edbw-buy-row select,
+.edbw-buy-row input[type="number"] {
   min-width: 260px;
   padding: 8px 10px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
+}
+
+.edbw-buy-row label {
+  font-weight: 600;
+  color: #1e293b;
 }
 
 @media (max-width: 900px) {

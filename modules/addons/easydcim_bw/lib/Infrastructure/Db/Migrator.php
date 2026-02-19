@@ -28,6 +28,7 @@ final class Migrator
         $this->createUpdateLog();
         $this->createPackages();
         $this->createServiceOverrides();
+        $this->createClientPrefs();
         $this->addMissingColumns();
         $this->addIndexes();
     }
@@ -42,6 +43,7 @@ final class Migrator
             'mod_easydcim_bw_guard_service_overrides',
             'mod_easydcim_bw_guard_product_defaults',
             'mod_easydcim_bw_guard_packages',
+            'mod_easydcim_bw_guard_client_prefs',
             'mod_easydcim_bw_guard_logs',
             'mod_easydcim_bw_guard_meta',
         ];
@@ -225,11 +227,51 @@ final class Migrator
         });
     }
 
+    private function createClientPrefs(): void
+    {
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_client_prefs')) {
+            return;
+        }
+
+        Capsule::schema()->create('mod_easydcim_bw_guard_client_prefs', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->integer('serviceid')->unsigned();
+            $table->integer('userid')->unsigned();
+            $table->boolean('autobuy_enabled')->default(false);
+            $table->decimal('autobuy_threshold_gb', 12, 2)->nullable();
+            $table->integer('autobuy_package_id')->unsigned()->nullable();
+            $table->integer('autobuy_max_per_cycle')->unsigned()->nullable();
+            $table->dateTime('created_at')->nullable();
+            $table->dateTime('updated_at')->nullable();
+        });
+    }
+
     private function addMissingColumns(): void
     {
         if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_service_state')) {
             $this->addColumnIfMissing('mod_easydcim_bw_guard_service_state', 'lock_version', static function (Blueprint $table): void {
                 $table->unsignedInteger('lock_version')->default(0);
+            });
+        }
+
+        if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_product_defaults')) {
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_product_defaults', 'default_quota_in_gb', static function (Blueprint $table): void {
+                $table->decimal('default_quota_in_gb', 12, 2)->nullable();
+            });
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_product_defaults', 'default_quota_out_gb', static function (Blueprint $table): void {
+                $table->decimal('default_quota_out_gb', 12, 2)->nullable();
+            });
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_product_defaults', 'default_quota_total_gb', static function (Blueprint $table): void {
+                $table->decimal('default_quota_total_gb', 12, 2)->nullable();
+            });
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_product_defaults', 'unlimited_in', static function (Blueprint $table): void {
+                $table->boolean('unlimited_in')->default(false);
+            });
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_product_defaults', 'unlimited_out', static function (Blueprint $table): void {
+                $table->boolean('unlimited_out')->default(false);
+            });
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_product_defaults', 'unlimited_total', static function (Blueprint $table): void {
+                $table->boolean('unlimited_total')->default(false);
             });
         }
 
@@ -257,6 +299,7 @@ final class Migrator
         $this->ensureIndex('mod_easydcim_bw_guard_graph_cache', 'idx_mod_edbw_graph_lookup', ['whmcs_serviceid', 'range_start', 'range_end', 'payload_hash']);
         $this->ensureIndex('mod_easydcim_bw_guard_logs', 'idx_mod_edbw_logs_level_created', ['level', 'created_at']);
         $this->ensureIndex('mod_easydcim_bw_guard_service_overrides', 'idx_mod_edbw_override_service', ['serviceid']);
+        $this->ensureIndex('mod_easydcim_bw_guard_client_prefs', 'idx_mod_edbw_client_prefs_service', ['serviceid', 'userid']);
     }
 
     private function ensureIndex(string $table, string $indexName, array $columns): void

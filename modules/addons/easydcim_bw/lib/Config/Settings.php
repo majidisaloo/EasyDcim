@@ -66,7 +66,7 @@ final class Settings
             'autobuy_default_package_id' => '0',
             'autobuy_max_per_cycle' => '5',
             'git_update_enabled' => '0',
-            'git_origin_url' => '',
+            'git_origin_url' => 'git@github.com:majidisaloo/EasyDcim.git',
             'git_branch' => 'main',
             'github_repo' => 'majidisaloo/EasyDcim',
             'update_channel' => 'commit',
@@ -76,6 +76,8 @@ final class Settings
             'purge_on_deactivate' => '0',
             'test_mode' => '0',
             'log_retention_days' => '30',
+            'traffic_direction_map' => 'normal',
+            'default_calculation_mode' => 'TOTAL',
         ];
     }
 

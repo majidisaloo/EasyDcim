@@ -2,6 +2,20 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.18] - 2026-02-19
+### Added
+- New admin `Scope` tab for managed `PID/GID` and per-plan quota rules by mode (`IN`, `OUT`, `TOTAL`) with unlimited option.
+- New client auto-buy preferences per service (enabled, threshold, package, max per cycle).
+- WHMCS admin service-page override fields via hooks (`AdminServicesTabFields` / save hook).
+- Global direction mapping option (`normal` / `swap`) for environments with reversed SNMP semantics.
+### Changed
+- Git shell mode is no longer required for update checks; release-based update flow is the primary path.
+- Cron heartbeat status now relies on WHMCS cron ping and marks unhealthy if not seen in last 6 minutes.
+- Logs tab now includes both retention cleanup and delete-all actions.
+### Fixed
+- Fixed `shell_exec`-related git updater runtime issue in shared-hosting environments.
+- Fixed log cleanup behavior by adding explicit delete-all action and retention cleanup reliability.
+
 ## [1.17] - 2026-02-19
 ### Added
 - New tabbed admin navigation: `Dashboard`, `Settings`, `Packages`, and `Logs`.

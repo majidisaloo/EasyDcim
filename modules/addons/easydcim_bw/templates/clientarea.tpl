@@ -13,13 +13,13 @@
     {/if}
     <div class="edbw-grid">
       <div class="edbw-panel">
-        <h3>Current Cycle</h3>
-        <div class="edbw-kpi">Used: <strong>{$used_gb|string_format:"%.2f"} GB</strong></div>
-        <div class="edbw-kpi">Remaining: <strong>{$remaining_gb|string_format:"%.2f"} GB</strong></div>
-        <div class="edbw-kpi">Mode: <strong>{$mode}</strong></div>
-        <div class="edbw-kpi">Status: <strong>{$status}</strong></div>
-        <div class="edbw-kpi">Cycle: {$cycle_start} → {$cycle_end}</div>
-        <div class="edbw-kpi">Reset at: {$reset_at}</div>
+        <h3>{$i18n.current_cycle}</h3>
+        <div class="edbw-kpi">{if $is_fa}مصرف:{else}Used:{/if} <strong>{$used_gb|string_format:"%.2f"} GB</strong></div>
+        <div class="edbw-kpi">{if $is_fa}باقی‌مانده:{else}Remaining:{/if} <strong>{$remaining_gb|string_format:"%.2f"} GB</strong></div>
+        <div class="edbw-kpi">{if $is_fa}حالت:{else}Mode:{/if} <strong>{$mode}</strong></div>
+        <div class="edbw-kpi">{if $is_fa}وضعیت:{else}Status:{/if} <strong>{$status}</strong></div>
+        <div class="edbw-kpi">{if $is_fa}سیکل:{else}Cycle:{/if} {$cycle_start} → {$cycle_end}</div>
+        <div class="edbw-kpi">{if $is_fa}ریست:{else}Reset at:{/if} {$reset_at} ({$days_to_reset} {if $is_fa}روز{/if}{if !$is_fa}days{/if})</div>
       </div>
 
       <div class="edbw-panel edbw-chart-panel">
@@ -36,7 +36,7 @@
     </div>
 
     <div class="edbw-panel">
-      <h3>Buy Additional Traffic (One-time for Current Cycle)</h3>
+      <h3>{$i18n.buy_additional} ({if $is_fa}فقط برای همین سیکل{/if}{if !$is_fa}One-time for Current Cycle{/if})</h3>
       <form method="post">
         <div class="edbw-buy-row">
           <select name="buy_package_id" required>
@@ -51,7 +51,30 @@
     </div>
 
     <div class="edbw-panel">
-      <h3>Purchases in Current Cycle</h3>
+      <h3>{$i18n.autobuy_title}</h3>
+      <form method="post">
+        <input type="hidden" name="save_autobuy" value="1">
+        <div class="edbw-buy-row">
+          <label>{if $is_fa}فعال{/if}{if !$is_fa}Enabled{/if}</label>
+          <input type="checkbox" name="autobuy_enabled" value="1" {if $autobuy_pref.autobuy_enabled == 1}checked{/if}>
+          <label>{if $is_fa}آستانه (GB){/if}{if !$is_fa}Threshold (GB){/if}</label>
+          <input type="number" step="0.01" min="0" name="autobuy_threshold_gb" value="{$autobuy_pref.autobuy_threshold_gb|default:''}">
+          <label>{if $is_fa}پکیج{/if}{if !$is_fa}Package{/if}</label>
+          <select name="autobuy_package_id">
+            <option value="">{if $is_fa}انتخاب پکیج{/if}{if !$is_fa}Select package{/if}</option>
+            {foreach $packages as $pkg}
+              <option value="{$pkg.id}" {if $autobuy_pref.autobuy_package_id == $pkg.id}selected{/if}>{$pkg.name} - {$pkg.size_gb}GB</option>
+            {/foreach}
+          </select>
+          <label>{if $is_fa}حداکثر در سیکل{/if}{if !$is_fa}Max / Cycle{/if}</label>
+          <input type="number" min="1" name="autobuy_max_per_cycle" value="{$autobuy_pref.autobuy_max_per_cycle|default:''}">
+          <button class="btn btn-default" type="submit">{$i18n.save}</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="edbw-panel">
+      <h3>{$i18n.purchases_cycle}</h3>
       <table class="table table-striped">
         <thead>
           <tr>

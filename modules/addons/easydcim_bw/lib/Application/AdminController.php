@@ -14,15 +14,19 @@ use WHMCS\Database\Capsule;
 
 final class AdminController
 {
+    private const RELEASE_REPO = 'majidisaloo/EasyDcim';
     private Settings $settings;
     private Logger $logger;
     private string $moduleDir;
+    private bool $isFa;
 
     public function __construct(Settings $settings, Logger $logger, string $moduleDir)
     {
         $this->settings = $settings;
         $this->logger = $logger;
         $this->moduleDir = $moduleDir;
+        $lang = strtolower((string) ($_SESSION['adminlang'] ?? $_SESSION['Language'] ?? 'english'));
+        $this->isFa = str_starts_with($lang, 'farsi') || str_starts_with($lang, 'persian') || str_starts_with($lang, 'fa');
     }
 
     public function handle(array $vars): void
@@ -43,7 +47,7 @@ final class AdminController
         }
 
         if ($action === 'apply_update') {
-            $this->applyOneClickUpdate();
+            $flash[] = ['type' => 'warning', 'text' => 'Git shell update is disabled. Use Release update actions.'];
         }
         if ($action === 'add_package') {
             $this->addPackage();
@@ -77,6 +81,18 @@ final class AdminController
             $flash[] = $this->cleanupLogsNow();
             $tab = 'logs';
         }
+        if ($action === 'cleanup_logs_all') {
+            $flash[] = $this->cleanupLogsAllNow();
+            $tab = 'logs';
+        }
+        if ($action === 'save_scope') {
+            $flash[] = $this->saveScopeSettings();
+            $tab = 'scope';
+        }
+        if ($action === 'save_product_default') {
+            $flash[] = $this->saveProductDefault();
+            $tab = 'scope';
+        }
 
         $this->settings = new Settings(Settings::loadFromDatabase());
         $version = Version::current($this->moduleDir);
@@ -85,7 +101,7 @@ final class AdminController
         echo '<div class="edbw-wrap">';
         echo '<div class="edbw-header">';
         echo '<h2>EasyDcim-BW</h2>';
-        echo '<p>Bandwidth control center for EasyDCIM services</p>';
+        echo '<p>' . htmlspecialchars($this->t('subtitle')) . '</p>';
         echo '</div>';
 
         foreach ($flash as $msg) {
@@ -97,6 +113,8 @@ final class AdminController
 
         if ($tab === 'settings') {
             $this->renderSettingsTab();
+        } elseif ($tab === 'scope') {
+            $this->renderScopeTab();
         } elseif ($tab === 'packages') {
             $this->renderPackagesTab();
         } elseif ($tab === 'logs') {
@@ -111,10 +129,11 @@ final class AdminController
     private function renderTabs(string $moduleLink, string $activeTab): void
     {
         $tabs = [
-            'dashboard' => 'Dashboard',
-            'settings' => 'Settings',
-            'packages' => 'Packages',
-            'logs' => 'Logs',
+            'dashboard' => $this->t('tab_dashboard'),
+            'settings' => $this->t('tab_settings'),
+            'scope' => $this->t('tab_scope'),
+            'packages' => $this->t('tab_packages'),
+            'logs' => $this->t('tab_logs'),
         ];
 
         echo '<div class="edbw-tabs">';
@@ -165,17 +184,6 @@ final class AdminController
         echo '</div>';
         echo '</div>';
 
-        if ($updateAvailable) {
-            echo '<div class="edbw-panel">';
-            echo '<h3>Git One-Click Update</h3>';
-            echo '<form method="post" action="' . htmlspecialchars($moduleLink) . '">';
-            echo '<input type="hidden" name="tab" value="dashboard">';
-            echo '<input type="hidden" name="action" value="apply_update">';
-            echo '<button class="btn btn-primary" type="submit">Apply Git Update</button>';
-            echo '</form>';
-            echo '</div>';
-        }
-
         $this->renderPreflightPanel();
     }
 
@@ -201,8 +209,6 @@ final class AdminController
 
         echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="60"></div>';
         echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="60"></div>';
-        echo '<div class="edbw-form-inline"><label>Managed PIDs</label><input type="text" name="managed_pids" value="' . htmlspecialchars($s->getString('managed_pids')) . '" size="40"></div>';
-        echo '<div class="edbw-form-inline"><label>Managed GIDs</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="40"></div>';
         echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation') ? 'checked' : '') . '></div>';
         echo '<div class="edbw-form-inline"><label>Poll Interval (min)</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
         echo '<div class="edbw-form-inline"><label>Graph Cache (min)</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
@@ -212,15 +218,14 @@ final class AdminController
         echo '<div class="edbw-form-inline"><label>Auto-Buy Default Package ID</label><input type="number" min="0" name="autobuy_default_package_id" value="' . (int) $s->getInt('autobuy_default_package_id', 0) . '"></div>';
         echo '<div class="edbw-form-inline"><label>Auto-Buy Max/Cycle</label><input type="number" min="1" name="autobuy_max_per_cycle" value="' . (int) $s->getInt('autobuy_max_per_cycle', 5) . '"></div>';
 
-        echo '<div class="edbw-form-inline"><label>Git Update Enabled</label><input type="checkbox" name="git_update_enabled" value="1" ' . ($s->getBool('git_update_enabled') ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Git Origin URL</label><input type="text" name="git_origin_url" value="' . htmlspecialchars($s->getString('git_origin_url')) . '" size="60"></div>';
-        echo '<div class="edbw-form-inline"><label>Git Branch</label><input type="text" name="git_branch" value="' . htmlspecialchars($s->getString('git_branch', 'main')) . '" size="20"></div>';
-        echo '<div class="edbw-form-inline"><label>GitHub Repo (owner/name)</label><input type="text" name="github_repo" value="' . htmlspecialchars($s->getString('github_repo', 'majidisaloo/EasyDcim')) . '" size="40"></div>';
+        echo '<div class="edbw-form-inline"><label>Update Source</label><span class="edbw-help">Hardcoded to GitHub release: majidisaloo/EasyDcim</span></div>';
         echo '<div class="edbw-form-inline"><label>Update Mode</label><select name="update_mode">';
         foreach (['notify', 'check_oneclick', 'auto'] as $mode) {
             echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
         }
         echo '</select></div>';
+        echo '<div class="edbw-form-inline"><label>Direction Mapping</label><select name="traffic_direction_map"><option value="normal"' . ($s->getString('traffic_direction_map', 'normal') === 'normal' ? ' selected' : '') . '>Normal</option><option value="swap"' . ($s->getString('traffic_direction_map', 'normal') === 'swap' ? ' selected' : '') . '>Swap IN/OUT</option></select><span class="edbw-help">Use swap if EasyDCIM IN/OUT is reversed on your network devices.</span></div>';
+        echo '<div class="edbw-form-inline"><label>Default Calculation Mode</label><select name="default_calculation_mode"><option value="TOTAL"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'TOTAL' ? ' selected' : '') . '>TOTAL (IN+OUT)</option><option value="IN"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'IN' ? ' selected' : '') . '>IN only</option><option value="OUT"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'OUT' ? ' selected' : '') . '>OUT only</option></select></div>';
 
         echo '<div class="edbw-form-inline"><label>Test Mode (Dry Run)</label><input type="checkbox" name="test_mode" value="1" ' . ($s->getBool('test_mode', false) ? 'checked' : '') . '><span class="edbw-help">No real suspend/disable/enable/unsuspend calls; logs show what would be sent.</span></div>';
         echo '<div class="edbw-form-inline"><label>Log Retention (days)</label><input type="number" min="1" name="log_retention_days" value="' . (int) $s->getInt('log_retention_days', 30) . '"></div>';
@@ -295,6 +300,53 @@ final class AdminController
         echo '</div>';
     }
 
+    private function renderScopeTab(): void
+    {
+        $s = $this->settings;
+        echo '<div class="edbw-panel">';
+        echo '<h3>Managed Scope</h3>';
+        echo '<form method="post" class="edbw-settings-grid">';
+        echo '<input type="hidden" name="tab" value="scope">';
+        echo '<input type="hidden" name="action" value="save_scope">';
+        echo '<div class="edbw-form-inline"><label>Managed PIDs</label><input type="text" name="managed_pids" value="' . htmlspecialchars($s->getString('managed_pids')) . '" size="70"><span class="edbw-help">Comma separated product IDs</span></div>';
+        echo '<div class="edbw-form-inline"><label>Managed GIDs</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="70"><span class="edbw-help">Comma separated group IDs</span></div>';
+        echo '<button class="btn btn-primary" type="submit">Save Scope</button>';
+        echo '</form>';
+        echo '</div>';
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>Plan Quotas (IN / OUT / TOTAL)</h3>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="tab" value="scope">';
+        echo '<input type="hidden" name="action" value="save_product_default">';
+        echo '<input type="number" min="1" name="pd_pid" placeholder="PID" required>';
+        echo '<select name="pd_mode"><option value="IN">IN</option><option value="OUT">OUT</option><option value="TOTAL" selected>TOTAL</option></select>';
+        echo '<input type="number" step="0.01" min="0" name="pd_quota_gb" placeholder="Quota GB">';
+        echo '<label>Unlimited</label><input type="checkbox" name="pd_unlimited" value="1">';
+        echo '<select name="pd_action"><option value="disable_ports">Disable Ports</option><option value="suspend">Suspend</option><option value="both">Both</option></select>';
+        echo '<button class="btn btn-default" type="submit">Save Plan Rule</button>';
+        echo '</form>';
+
+        $rows = Capsule::table('mod_easydcim_bw_guard_product_defaults')->orderByDesc('id')->limit(500)->get();
+        echo '<div class="edbw-table-wrap">';
+        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>Mode</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>Unlimited IN/OUT/TOTAL</th><th>Action</th><th>Enabled</th></tr></thead><tbody>';
+        foreach ($rows as $r) {
+            echo '<tr>';
+            echo '<td>' . (int) $r->pid . '</td>';
+            echo '<td>' . htmlspecialchars((string) $r->default_mode) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($r->default_quota_in_gb ?? '')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($r->default_quota_out_gb ?? '')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($r->default_quota_total_gb ?? $r->default_quota_gb ?? '')) . '</td>';
+            echo '<td>' . ((int) ($r->unlimited_in ?? 0)) . '/' . ((int) ($r->unlimited_out ?? 0)) . '/' . ((int) ($r->unlimited_total ?? 0)) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $r->default_action) . '</td>';
+            echo '<td>' . ((int) $r->enabled === 1 ? 'Yes' : 'No') . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '</div>';
+        echo '</div>';
+    }
+
     private function renderLogsTab(): void
     {
         $retention = max(1, $this->settings->getInt('log_retention_days', 30));
@@ -305,6 +357,11 @@ final class AdminController
         echo '<input type="hidden" name="tab" value="logs">';
         echo '<input type="hidden" name="action" value="cleanup_logs">';
         echo '<button class="btn btn-default" type="submit">Cleanup Logs Now</button>';
+        echo '</form>';
+        echo '<form method="post" class="edbw-form-inline">';
+        echo '<input type="hidden" name="tab" value="logs">';
+        echo '<input type="hidden" name="action" value="cleanup_logs_all">';
+        echo '<button class="btn btn-default" type="submit">Delete All Logs</button>';
         echo '</form>';
 
         $logs = $this->getSystemLogs(500);
@@ -387,7 +444,7 @@ final class AdminController
         $checks[] = ['name' => 'PHP version', 'ok' => $phpOk, 'detail' => 'Current: ' . PHP_VERSION . ', required: >= 8.0'];
 
         $checks[] = ['name' => 'cURL extension', 'ok' => function_exists('curl_init'), 'detail' => function_exists('curl_init') ? 'Available' : 'Missing'];
-        $checks[] = ['name' => 'Git mode capability (shell_exec)', 'ok' => function_exists('shell_exec'), 'detail' => function_exists('shell_exec') ? 'Available' : 'Disabled (use release update mode)'];
+        $checks[] = ['name' => 'Git mode capability (shell_exec)', 'ok' => true, 'detail' => 'Not required (release-based updater is active)'];
         $checks[] = ['name' => 'ZIP extension', 'ok' => class_exists(\ZipArchive::class), 'detail' => class_exists(\ZipArchive::class) ? 'Available' : 'Missing'];
 
         $baseUrl = $this->settings->getString('easydcim_base_url');
@@ -427,11 +484,11 @@ final class AdminController
             })
             ->count();
 
-        $lastPoll = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
-        $cronOk = $lastPoll !== '' && strtotime($lastPoll) > time() - 3600;
+        $lastWhmcsCron = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_whmcs_cron_at')->value('meta_value');
+        $cronOk = $lastWhmcsCron !== '' && strtotime($lastWhmcsCron) > time() - 360;
 
         return [
-            ['label' => 'Cron status', 'value' => $cronOk ? 'Connected' : 'Not running recently', 'state' => $cronOk ? 'ok' : 'error', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>'],
+            ['label' => 'Cron status', 'value' => $cronOk ? ('Active (last ping: ' . $lastWhmcsCron . ')') : 'Not running in last 6 minutes', 'state' => $cronOk ? 'ok' : 'error', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>'],
             ['label' => 'Traffic-limited services', 'value' => (string) $limitedCount, 'state' => $limitedCount > 0 ? 'warn' : 'ok', 'icon' => '<svg viewBox="0 0 24 24"><path d="M4 20h16M7 16h10M10 12h4M12 4v4"></path></svg>'],
             ['label' => 'Synced (last 1h)', 'value' => (string) $syncedInLastHour, 'state' => $syncedInLastHour > 0 ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M3 12h6l3-8 4 16 3-8h2"></path></svg>'],
             ['label' => 'Suspended (other reasons)', 'value' => (string) $suspendedOther, 'state' => $suspendedOther > 0 ? 'warn' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>'],
@@ -503,10 +560,81 @@ final class AdminController
         }
     }
 
+    private function cleanupLogsAllNow(): array
+    {
+        try {
+            $deleted = Capsule::table('mod_easydcim_bw_guard_logs')->delete();
+            return ['type' => 'success', 'text' => 'All logs removed: ' . (int) $deleted];
+        } catch (\Throwable $e) {
+            return ['type' => 'danger', 'text' => 'Delete all logs failed: ' . $e->getMessage()];
+        }
+    }
+
+    private function saveScopeSettings(): array
+    {
+        $current = Settings::loadFromDatabase();
+        $current['managed_pids'] = trim((string) ($_POST['managed_pids'] ?? ''));
+        $current['managed_gids'] = trim((string) ($_POST['managed_gids'] ?? ''));
+        Settings::saveToDatabase($current);
+        return ['type' => 'success', 'text' => 'Scope saved.'];
+    }
+
+    private function saveProductDefault(): array
+    {
+        try {
+            $pid = (int) ($_POST['pd_pid'] ?? 0);
+            $mode = strtoupper(trim((string) ($_POST['pd_mode'] ?? 'TOTAL')));
+            $quota = ($_POST['pd_quota_gb'] ?? '') !== '' ? (float) $_POST['pd_quota_gb'] : null;
+            $unlimited = isset($_POST['pd_unlimited']) ? 1 : 0;
+            $action = trim((string) ($_POST['pd_action'] ?? 'disable_ports'));
+            if ($pid <= 0) {
+                return ['type' => 'danger', 'text' => 'Invalid PID.'];
+            }
+            if (!in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
+                $mode = 'TOTAL';
+            }
+            if (!in_array($action, ['disable_ports', 'suspend', 'both'], true)) {
+                $action = 'disable_ports';
+            }
+
+            $row = Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('pid', $pid)->first();
+            $data = [
+                'pid' => $pid,
+                'default_mode' => $mode,
+                'default_action' => $action,
+                'enabled' => 1,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'created_at' => date('Y-m-d H:i:s'),
+            ];
+
+            if ($mode === 'IN') {
+                $data['default_quota_in_gb'] = $quota;
+                $data['unlimited_in'] = $unlimited;
+            } elseif ($mode === 'OUT') {
+                $data['default_quota_out_gb'] = $quota;
+                $data['unlimited_out'] = $unlimited;
+            } else {
+                $data['default_quota_total_gb'] = $quota;
+                $data['default_quota_gb'] = $quota ?? 0;
+                $data['unlimited_total'] = $unlimited;
+            }
+
+            if ($row) {
+                Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('id', (int) $row->id)->update($data);
+            } else {
+                Capsule::table('mod_easydcim_bw_guard_product_defaults')->insert($data);
+            }
+
+            return ['type' => 'success', 'text' => 'Plan quota rule saved.'];
+        } catch (\Throwable $e) {
+            return ['type' => 'danger', 'text' => 'Failed to save plan rule: ' . $e->getMessage()];
+        }
+    }
+
     private function checkReleaseUpdate(): array
     {
         try {
-            $repo = $this->settings->getString('github_repo', 'majidisaloo/EasyDcim');
+            $repo = self::RELEASE_REPO;
             $release = $this->fetchLatestRelease($repo);
             $latestTag = (string) ($release['tag_name'] ?? '');
             $latestVersion = ltrim($latestTag, 'vV');
@@ -539,7 +667,7 @@ final class AdminController
                 throw new \RuntimeException('ZipArchive extension is required.');
             }
 
-            $repo = $this->settings->getString('github_repo', 'majidisaloo/EasyDcim');
+            $repo = self::RELEASE_REPO;
             $release = $this->fetchLatestRelease($repo);
             $zipUrl = $this->extractZipUrl($release);
             if ($zipUrl === '') {
@@ -797,5 +925,27 @@ final class AdminController
             ]
         );
         echo '<div class="alert alert-success">Override saved.</div>';
+    }
+
+    private function t(string $key): string
+    {
+        $fa = [
+            'subtitle' => 'مرکز کنترل ترافیک سرویس‌های EasyDCIM',
+            'tab_dashboard' => 'داشبورد',
+            'tab_settings' => 'تنظیمات',
+            'tab_scope' => 'اسکوپ',
+            'tab_packages' => 'پکیج‌ها',
+            'tab_logs' => 'لاگ‌ها',
+        ];
+        $en = [
+            'subtitle' => 'Bandwidth control center for EasyDCIM services',
+            'tab_dashboard' => 'Dashboard',
+            'tab_settings' => 'Settings',
+            'tab_scope' => 'Scope',
+            'tab_packages' => 'Packages',
+            'tab_logs' => 'Logs',
+        ];
+        $map = $this->isFa ? $fa : $en;
+        return $map[$key] ?? $key;
     }
 }

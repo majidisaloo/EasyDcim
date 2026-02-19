@@ -20,6 +20,9 @@ final class GitUpdateManager
 
     public function checkForUpdate(string $originUrl, string $branch): array
     {
+        if (!function_exists('shell_exec')) {
+            return ['available' => false, 'local_sha' => '', 'remote_sha' => '', 'disabled' => true];
+        }
         if ($originUrl === '' || $branch === '') {
             throw new \RuntimeException('Origin URL and branch are required');
         }
@@ -54,6 +57,9 @@ final class GitUpdateManager
 
     public function applyOneClickUpdate(string $originUrl, string $branch): array
     {
+        if (!function_exists('shell_exec')) {
+            throw new \RuntimeException('Git shell mode is disabled. Use release update mode.');
+        }
         if ($originUrl === '' || $branch === '') {
             throw new \RuntimeException('Origin URL and branch are required');
         }
@@ -105,7 +111,7 @@ final class GitUpdateManager
     private function runGit(string $command): string
     {
         if (!function_exists('shell_exec')) {
-            throw new \RuntimeException('shell_exec is disabled for git update manager');
+            return '';
         }
 
         $cmd = 'git -C ' . escapeshellarg($this->repoRoot) . ' ' . $command . ' 2>&1';

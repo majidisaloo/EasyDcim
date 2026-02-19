@@ -2,7 +2,7 @@
 
 Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git updates, and complete traffic purchase audit logs.
 
-Current version: `1.17`
+Current version: `1.18`
 
 ## Key Features
 
@@ -17,6 +17,9 @@ Current version: `1.17`
 - Admin UI is tab-based (`Dashboard`, `Settings`, `Packages`, `Logs`) with color-coded status cards.
 - Test mode (dry run) logs intended enforcement commands without sending real suspend/port actions.
 - Configurable log retention with automatic cleanup in cron and manual cleanup in Logs tab.
+- Added `Scope` tab for managed `PID/GID` and per-plan quota rules (`IN/OUT/TOTAL` + unlimited toggles).
+- Client area now supports per-service auto-buy preferences and shows cycle reset remaining days.
+- Service override fields are now available directly in WHMCS admin service page.
 - Admin package management and client one-time per-cycle purchase flow.
 - Auto-buy from client credit with max-purchases-per-cycle guard.
 - Client chart view with cache.

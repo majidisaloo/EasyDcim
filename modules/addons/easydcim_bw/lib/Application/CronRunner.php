@@ -10,14 +10,15 @@ use EasyDcimBandwidthGuard\Domain\EnforcementService;
 use EasyDcimBandwidthGuard\Domain\PurchaseService;
 use EasyDcimBandwidthGuard\Domain\QuotaResolver;
 use EasyDcimBandwidthGuard\Infrastructure\EasyDcimClient;
-use EasyDcimBandwidthGuard\Infrastructure\Git\GitUpdateManager;
 use EasyDcimBandwidthGuard\Infrastructure\Lock\LockManager;
 use EasyDcimBandwidthGuard\Support\Crypto;
 use EasyDcimBandwidthGuard\Support\Logger;
+use EasyDcimBandwidthGuard\Support\Version;
 use WHMCS\Database\Capsule;
 
 final class CronRunner
 {
+    private const RELEASE_REPO = 'majidisaloo/EasyDcim';
     private Settings $settings;
     private Logger $logger;
 
@@ -66,27 +67,42 @@ final class CronRunner
 
     public function runUpdateCheck(string $moduleDir): void
     {
-        if (!$this->settings->getBool('git_update_enabled', false)) {
-            return;
-        }
-
         $lastCheck = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_update_check_at')->value('meta_value');
         $interval = max(5, $this->settings->getInt('update_check_interval_minutes', 30));
         if ($lastCheck && strtotime((string) $lastCheck) > time() - ($interval * 60)) {
             return;
         }
 
-        $manager = new GitUpdateManager($moduleDir, $this->logger);
-        $origin = $this->settings->getString('git_origin_url');
-        $branch = $this->settings->getString('git_branch', 'main');
-        if ($origin === '') {
-            return;
-        }
-
         try {
-            $result = $manager->checkForUpdate($origin, $branch);
-            if (($result['available'] ?? false) && $this->settings->getString('update_mode', 'check_oneclick') === 'auto') {
-                $manager->applyOneClickUpdate($origin, $branch);
+            $repo = self::RELEASE_REPO;
+            $release = $this->fetchLatestRelease($repo);
+            $latestTag = (string) ($release['tag_name'] ?? '');
+            $latestVersion = ltrim($latestTag, 'vV');
+            $currentVersion = Version::current($moduleDir)['module_version'];
+            $available = $this->compareVersion($latestVersion, $currentVersion) > 0;
+
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_latest_tag'],
+                ['meta_value' => $latestTag, 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_update_available'],
+                ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'update_available'],
+                ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+
+            $this->logger->log('INFO', 'release_update_check', [
+                'repo' => $repo,
+                'latest_tag' => $latestTag,
+                'available' => $available ? 1 : 0,
+                'current_version' => $currentVersion,
+            ]);
+
+            if ($available && $this->settings->getString('update_mode', 'check_oneclick') === 'auto') {
+                $this->logger->log('WARNING', 'release_auto_update_skipped', ['reason' => 'manual_apply_required']);
             }
         } catch (\Throwable $e) {
             $this->logger->log('ERROR', 'update_check_failed', ['error' => $e->getMessage()]);
@@ -96,6 +112,49 @@ final class CronRunner
             ['meta_key' => 'last_update_check_at'],
             ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
         );
+    }
+
+    private function fetchLatestRelease(string $repo): array
+    {
+        if (!function_exists('curl_init')) {
+            throw new \RuntimeException('cURL extension is required for update checks.');
+        }
+
+        $repo = trim($repo);
+        if (!preg_match('/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/', $repo)) {
+            throw new \RuntimeException('Invalid github_repo format.');
+        }
+
+        $ch = curl_init('https://api.github.com/repos/' . $repo . '/releases/latest');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW', 'Accept: application/vnd.github+json']);
+        $raw = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($code < 200 || $code >= 300) {
+            throw new \RuntimeException('Release API failed: HTTP ' . $code . ' ' . $err);
+        }
+
+        $data = json_decode((string) $raw, true);
+        if (!is_array($data) || !isset($data['tag_name'])) {
+            throw new \RuntimeException('Invalid release API payload.');
+        }
+        return $data;
+    }
+
+    private function compareVersion(string $a, string $b): int
+    {
+        $normalize = static function (string $v): array {
+            if (!preg_match('/^(\d+)\.(\d{1,2})$/', trim($v), $m)) {
+                return [0, 0];
+            }
+            return [(int) $m[1], (int) $m[2]];
+        };
+        [$aMaj, $aMin] = $normalize($a);
+        [$bMaj, $bMin] = $normalize($b);
+        return ($aMaj <=> $bMaj) ?: ($aMin <=> $bMin);
     }
 
     private function processService(
@@ -119,7 +178,8 @@ final class CronRunner
                 (int) $service['packageid'],
                 $cycle['start'],
                 $cycle['end'],
-                $service['custom_fields']
+                $service['custom_fields'],
+                strtoupper($this->settings->getString('default_calculation_mode', 'TOTAL'))
             );
 
             $impersonate = $this->settings->getBool('use_impersonation', false)
@@ -194,6 +254,11 @@ final class CronRunner
         $mode = strtoupper($mode);
         $in = (float) ($payload['in'] ?? $payload['inbound'] ?? $payload['download'] ?? 0);
         $out = (float) ($payload['out'] ?? $payload['outbound'] ?? $payload['upload'] ?? 0);
+        if ($this->settings->getString('traffic_direction_map', 'normal') === 'swap') {
+            $tmp = $in;
+            $in = $out;
+            $out = $tmp;
+        }
         $total = (float) ($payload['total'] ?? ($in + $out));
 
         $bytes = match ($mode) {
@@ -289,16 +354,26 @@ final class CronRunner
 
     private function maybeAutoBuy(array $service, array $cycle, float $remaining, PurchaseService $purchaseService): float
     {
-        if (!$this->settings->getBool('autobuy_enabled', false)) {
+        $prefs = Capsule::table('mod_easydcim_bw_guard_client_prefs')
+            ->where('serviceid', (int) $service['id'])
+            ->where('userid', (int) $service['userid'])
+            ->first();
+
+        $enabled = $prefs ? ((int) ($prefs->autobuy_enabled ?? 0) === 1) : $this->settings->getBool('autobuy_enabled', false);
+        if (!$enabled) {
             return 0.0;
         }
 
-        $threshold = (float) $this->settings->getInt('autobuy_threshold_gb', 10);
+        $threshold = $prefs && $prefs->autobuy_threshold_gb !== null
+            ? (float) $prefs->autobuy_threshold_gb
+            : (float) $this->settings->getInt('autobuy_threshold_gb', 10);
         if ($remaining > $threshold) {
             return 0.0;
         }
 
-        $packageId = $this->settings->getInt('autobuy_default_package_id', 0);
+        $packageId = $prefs && $prefs->autobuy_package_id !== null
+            ? (int) $prefs->autobuy_package_id
+            : $this->settings->getInt('autobuy_default_package_id', 0);
         if ($packageId <= 0) {
             return 0.0;
         }
@@ -314,7 +389,10 @@ final class CronRunner
             ->where('cycle_end', $cycle['end'])
             ->where('actor', 'autobuy_cron')
             ->count();
-        if ($alreadyBought >= max(1, $this->settings->getInt('autobuy_max_per_cycle', 5))) {
+        $maxPerCycle = $prefs && $prefs->autobuy_max_per_cycle !== null
+            ? (int) $prefs->autobuy_max_per_cycle
+            : max(1, $this->settings->getInt('autobuy_max_per_cycle', 5));
+        if ($alreadyBought >= max(1, $maxPerCycle)) {
             return 0.0;
         }
 

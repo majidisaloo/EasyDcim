@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.76] - 2026-02-19
+### Fixed
+- Improved order-details ports fallback parser to detect more EasyDCIM payload variants (`number`, `port_number`, `user_label`, connection keys, and `ports` parent context).
+- Added diagnostic log `resolved_ports_from_order_empty` with top-level keys when order details return no parsable ports.
+- Helps resolve manual test cases that stayed on HTTP 422 despite valid `order_id/server_id` mapping.
+
 ## [1.75] - 2026-02-19
 ### Fixed
 - Batch service test now retries `client/services/{id}/ports` without impersonation on HTTP `401/403/422` (same as manual test path).

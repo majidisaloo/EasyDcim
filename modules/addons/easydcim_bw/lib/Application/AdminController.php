@@ -3305,6 +3305,11 @@ final class AdminController
                 ]);
                 return ['ok' => true, 'items' => $items];
             }
+            $this->logger->log('INFO', 'resolved_ports_from_order_empty', [
+                'order_id' => $orderId,
+                'http_code' => (int) ($details['http_code'] ?? 0),
+                'top_keys' => array_slice(array_values(array_map(static fn ($k): string => (string) $k, array_keys($data))), 0, 25),
+            ]);
         } catch (\Throwable $e) {
             $this->logger->log('WARNING', 'resolve_ports_from_order_failed', [
                 'order_id' => $orderId,
@@ -3314,11 +3319,11 @@ final class AdminController
         return ['ok' => false, 'items' => []];
     }
 
-    private function extractPortsRecursive($value): array
+    private function extractPortsRecursive($value, string $parentKey = ''): array
     {
         $result = [];
         if (is_array($value)) {
-            $looksLikePort = $this->isLikelyPortRow($value);
+            $looksLikePort = $this->isLikelyPortRow($value, $parentKey);
 
             if ($looksLikePort) {
                 $portId = trim((string) ($value['port_id'] ?? $value['portId'] ?? $value['portid'] ?? $value['id'] ?? ''));
@@ -3346,9 +3351,10 @@ final class AdminController
                 ];
             }
 
-            foreach ($value as $child) {
+            foreach ($value as $k => $child) {
                 if (is_array($child)) {
-                    foreach ($this->extractPortsRecursive($child) as $p) {
+                    $nextParent = is_string($k) ? strtolower(trim($k)) : $parentKey;
+                    foreach ($this->extractPortsRecursive($child, $nextParent) as $p) {
                         $result[] = $p;
                     }
                 }
@@ -3623,17 +3629,23 @@ final class AdminController
         return $out;
     }
 
-    private function isLikelyPortRow(array $row): bool
+    private function isLikelyPortRow(array $row, string $parentKey = ''): bool
     {
         $keys = array_map(static fn ($k): string => strtolower((string) $k), array_keys($row));
         $portKeys = [
             'port', 'port_id', 'portid', 'interface', 'port_type',
+            'number', 'port_number', 'user_label', 'connection', 'connection_item',
             'connected_port_id', 'conn_port_id', 'conn_port',
             'connected_item_id', 'conn_item_id', 'conn_item',
             'admin_state', 'oper_state', 'speed', 'vlan', 'vlans',
         ];
         foreach ($portKeys as $k) {
             if (in_array($k, $keys, true)) {
+                return true;
+            }
+        }
+        if (in_array($parentKey, ['ports', 'port', 'portconnections', 'connections'], true)) {
+            if (isset($row['id']) || isset($row['name']) || isset($row['label']) || isset($row['number'])) {
                 return true;
             }
         }

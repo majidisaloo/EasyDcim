@@ -285,6 +285,55 @@
   text-align: center;
 }
 
+.edbw-port-summary {
+  font-weight: 700;
+}
+
+.edbw-port-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.edbw-port-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.edbw-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.edbw-dot-green {
+  background: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18);
+}
+
+.edbw-dot-yellow {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+}
+
+.edbw-dot-red {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
+}
+
+.edbw-port-name {
+  font-weight: 600;
+}
+
+.edbw-port-state {
+  color: #64748b;
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   .edbw-form-inline label {
     min-width: 100%;

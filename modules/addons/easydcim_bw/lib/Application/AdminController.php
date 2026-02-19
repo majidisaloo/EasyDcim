@@ -580,10 +580,7 @@ final class AdminController
         echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>' . htmlspecialchars($this->t('product_id')) . '</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
         foreach ($services as $svc) {
             $testCache = $this->getServiceTestCache((int) $svc['serviceid']);
-            $portsLabel = (string) $svc['ports_summary'];
-            if (($portsLabel === '' || $portsLabel === $this->t('no_data')) && $testCache !== null) {
-                $portsLabel = (string) ($testCache['summary'] ?? $portsLabel);
-            }
+            $portsHtml = $this->renderPortStatusHtml($svc, $testCache);
             echo '<tr>';
             echo '<td><a href="' . htmlspecialchars((string) $svc['service_url']) . '">#' . (int) $svc['serviceid'] . '</a></td>';
             echo '<td><a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a></td>';
@@ -592,7 +589,7 @@ final class AdminController
             echo '<td>' . htmlspecialchars((string) ($svc['easydcim_order_id'] ?: '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($svc['easydcim_service_id'] ?: '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($svc['easydcim_server_id'] ?: '-')) . '</td>';
-            echo '<td>' . htmlspecialchars($portsLabel) . '</td>';
+            echo '<td>' . $portsHtml . '</td>';
             echo '<td>' . htmlspecialchars($this->domainStatusLabel((string) ($svc['domainstatus'] ?? ''))) . '</td>';
             echo '<td><form method="post" class="edbw-form-inline" style="margin:0;padding:0;border:0;background:none"><input type="hidden" name="tab" value="servers"><input type="hidden" name="action" value="test_service_item"><input type="hidden" name="test_serviceid" value="' . (int) $svc['serviceid'] . '"><button type="submit" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('test')) . '</button></form></td>';
             echo '</tr>';
@@ -1634,6 +1631,7 @@ final class AdminController
             $portIds = [];
             $connectedPortIds = [];
             $connectedItemIds = [];
+            $portRows = [];
             foreach ($items as $p) {
                 if (!$this->isNetworkPortCandidate((string) ($p['name'] ?? ''), (string) ($p['description'] ?? ''), (string) ($p['type'] ?? ''))) {
                     continue;
@@ -1655,6 +1653,15 @@ final class AdminController
                 if ($ciid !== '') {
                     $connectedItemIds[$ciid] = true;
                 }
+                $portRows[] = [
+                    'name' => (string) ($p['name'] ?? ''),
+                    'is_up' => !empty($p['is_up']),
+                    'traffic_total' => (float) ($p['traffic_total'] ?? 0.0),
+                    'port_id' => $pid,
+                    'connected_port_id' => $cpid,
+                    'connected_item_id' => $ciid,
+                    'connected_port_label' => (string) ($p['connected_port_label'] ?? ''),
+                ];
             }
 
             if (($mode === 'none' || $mode === 'server_id_only') && $err === '') {
@@ -1696,6 +1703,7 @@ final class AdminController
                 'port_ids' => array_values(array_keys($portIds)),
                 'connected_port_ids' => array_values(array_keys($connectedPortIds)),
                 'connected_item_ids' => array_values(array_keys($connectedItemIds)),
+                'connected_port_labels' => array_values(array_unique(array_filter(array_map(static fn (array $r): string => trim((string) ($r['connected_port_label'] ?? '')), $portRows)))),
                 'easydcim_service_id' => (string) ($target['easydcim_service_id'] ?? ''),
                 'easydcim_server_id' => (string) ($target['easydcim_server_id'] ?? ''),
                 'easydcim_order_id' => (string) ($target['easydcim_order_id'] ?? ''),
@@ -1705,6 +1713,7 @@ final class AdminController
                 'type' => $statusType,
                 'http_code' => $code,
                 'mode' => $mode,
+                'port_rows' => array_slice($portRows, 0, 30),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
             return ['type' => $statusType, 'text' => $statusText];
@@ -3101,26 +3110,21 @@ final class AdminController
     {
         $result = [];
         if (is_array($value)) {
-            $lowerKeys = array_map(static fn ($k): string => strtolower((string) $k), array_keys($value));
-            $looksLikePort = in_array('id', $lowerKeys, true)
-                || in_array('name', $lowerKeys, true)
-                || in_array('port', $lowerKeys, true)
-                || in_array('port_id', $lowerKeys, true)
-                || in_array('portid', $lowerKeys, true)
-                || in_array('interface', $lowerKeys, true);
+            $looksLikePort = $this->isLikelyPortRow($value);
 
             if ($looksLikePort) {
-                $portId = trim((string) ($value['id'] ?? $value['port_id'] ?? $value['portId'] ?? $value['portid'] ?? ''));
-                $name = (string) ($value['name'] ?? $value['port'] ?? $value['interface'] ?? $value['label'] ?? 'port');
+                $portId = trim((string) ($value['port_id'] ?? $value['portId'] ?? $value['portid'] ?? $value['id'] ?? ''));
+                $name = (string) ($value['name'] ?? $value['label'] ?? $value['port'] ?? $value['interface'] ?? $value['connected_port_label'] ?? $value['connected_port_name'] ?? 'port');
                 if ($portId !== '' && !str_contains($name, '#' . $portId)) {
                     $name = '#' . $portId . ' ' . $name;
                 }
-                $status = strtolower((string) ($value['status'] ?? $value['state'] ?? $value['admin_state'] ?? ''));
+                $status = strtolower((string) ($value['status'] ?? $value['state'] ?? $value['admin_state'] ?? $value['oper_state'] ?? ''));
                 $isUp = in_array($status, ['up', 'active', 'enabled', 'online', 'accepted'], true)
                     || ((int) ($value['is_up'] ?? $value['up'] ?? $value['is_active'] ?? $value['enabled'] ?? 0) === 1);
-                $traffic = (float) ($value['traffic_total'] ?? $value['total'] ?? $value['usage'] ?? 0.0);
-                $connectedItemId = trim((string) ($value['connected_item_id'] ?? $value['conn_item_id'] ?? $value['item_id'] ?? ''));
-                $connectedPortId = trim((string) ($value['connected_port_id'] ?? $value['conn_port_id'] ?? $value['connected_port'] ?? ''));
+                $traffic = (float) ($value['traffic_total'] ?? $value['total'] ?? $value['usage'] ?? $value['total_1m'] ?? 0.0);
+                $connectedItemId = trim((string) ($value['connected_item_id'] ?? $value['conn_item_id'] ?? $value['conn_item'] ?? $value['item_id'] ?? ''));
+                $connectedPortId = trim((string) ($value['connected_port_id'] ?? $value['conn_port_id'] ?? $value['connected_port_id'] ?? $value['conn_port'] ?? ''));
+                $connectedLabel = trim((string) ($value['connected_port_label'] ?? $value['connected_port_name'] ?? $value['connected_port'] ?? $value['conn_port_label'] ?? $value['conn_port_name'] ?? ''));
                 $result[] = [
                     'name' => $name,
                     'description' => (string) ($value['description'] ?? ''),
@@ -3130,6 +3134,7 @@ final class AdminController
                     'port_id' => $portId,
                     'connected_item_id' => $connectedItemId,
                     'connected_port_id' => $connectedPortId,
+                    'connected_port_label' => $connectedLabel,
                 ];
             }
 
@@ -3368,16 +3373,19 @@ final class AdminController
             if (!is_array($row)) {
                 continue;
             }
-            $name = (string) ($row['name'] ?? $row['label'] ?? '');
+            if (!$this->isLikelyPortRow($row)) {
+                continue;
+            }
+            $name = (string) ($row['name'] ?? $row['label'] ?? $row['port'] ?? $row['interface'] ?? $row['connected_port_label'] ?? '');
             $desc = (string) ($row['description'] ?? $row['note'] ?? '');
             $type = (string) ($row['type'] ?? $row['port_type'] ?? '');
-            $portId = trim((string) ($row['id'] ?? $row['port_id'] ?? $row['portId'] ?? $row['portid'] ?? ''));
+            $portId = trim((string) ($row['port_id'] ?? $row['portId'] ?? $row['portid'] ?? $row['id'] ?? ''));
             if ($name === '' && $portId !== '') {
                 $name = '#' . $portId;
             } elseif ($name !== '' && $portId !== '' && !str_contains($name, '#' . $portId)) {
                 $name = '#' . $portId . ' ' . $name;
             }
-            $state = strtolower((string) ($row['status'] ?? $row['state'] ?? ''));
+            $state = strtolower((string) ($row['status'] ?? $row['state'] ?? $row['admin_state'] ?? $row['oper_state'] ?? ''));
             $upRaw = $row['is_up'] ?? $row['up'] ?? null;
             $isUp = false;
             if (is_bool($upRaw)) {
@@ -3389,7 +3397,8 @@ final class AdminController
             } else {
                 $isUp = in_array($state, ['up', 'active', 'enabled', 'online', 'accepted'], true);
             }
-            $trafficTotal = (float) ($row['traffic_total'] ?? $row['total'] ?? $row['total_1m'] ?? 0.0);
+            $trafficTotal = (float) ($row['traffic_total'] ?? $row['total'] ?? $row['total_1m'] ?? $row['usage'] ?? 0.0);
+            $connectedPortLabel = trim((string) ($row['connected_port_label'] ?? $row['connected_port_name'] ?? $row['connected_port'] ?? $row['conn_port_label'] ?? $row['conn_port_name'] ?? ''));
             $out[] = [
                 'name' => $name,
                 'description' => $desc,
@@ -3397,12 +3406,82 @@ final class AdminController
                 'is_up' => $isUp,
                 'traffic_total' => $trafficTotal,
                 'port_id' => $portId,
-                'connected_item_id' => trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['item_id'] ?? '')),
-                'connected_port_id' => trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['connected_port'] ?? '')),
+                'connected_item_id' => trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['conn_item'] ?? $row['item_id'] ?? '')),
+                'connected_port_id' => trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['connected_port_id'] ?? $row['conn_port'] ?? '')),
+                'connected_port_label' => $connectedPortLabel,
             ];
         }
 
         return $out;
+    }
+
+    private function isLikelyPortRow(array $row): bool
+    {
+        $keys = array_map(static fn ($k): string => strtolower((string) $k), array_keys($row));
+        $portKeys = [
+            'port', 'port_id', 'portid', 'interface', 'port_type',
+            'connected_port_id', 'conn_port_id', 'conn_port',
+            'connected_item_id', 'conn_item_id', 'conn_item',
+            'admin_state', 'oper_state', 'speed', 'vlan', 'vlans',
+        ];
+        foreach ($portKeys as $k) {
+            if (in_array($k, $keys, true)) {
+                return true;
+            }
+        }
+        $label = strtolower(trim((string) ($row['name'] ?? $row['label'] ?? $row['description'] ?? '')));
+        if ($label !== '' && preg_match('/(port|ethernet|gig|gi\\d|te\\d|eth\\d)/i', $label)) {
+            return true;
+        }
+        return false;
+    }
+
+    private function renderPortStatusHtml(array $svc, ?array $testCache): string
+    {
+        $summary = (string) ($svc['ports_summary'] ?? $this->t('no_data'));
+        if (($summary === '' || $summary === $this->t('no_data')) && is_array($testCache)) {
+            $summary = (string) ($testCache['summary'] ?? $summary);
+        }
+
+        $lines = [];
+        if (is_array($testCache) && isset($testCache['port_rows']) && is_array($testCache['port_rows'])) {
+            $rows = $testCache['port_rows'];
+            $connectedRows = array_values(array_filter($rows, static function (array $r): bool {
+                return trim((string) ($r['connected_port_id'] ?? '')) !== ''
+                    || trim((string) ($r['connected_item_id'] ?? '')) !== ''
+                    || trim((string) ($r['connected_port_label'] ?? '')) !== '';
+            }));
+            if (!empty($connectedRows)) {
+                $rows = $connectedRows;
+            }
+            foreach ($rows as $r) {
+                $isUp = !empty($r['is_up']);
+                $traffic = (float) ($r['traffic_total'] ?? 0.0);
+                $stateClass = 'edbw-dot-red';
+                $stateText = $this->isFa ? 'قطع' : 'Down';
+                if ($isUp && $traffic > 0.0) {
+                    $stateClass = 'edbw-dot-green';
+                    $stateText = $this->isFa ? 'فعال' : 'Up';
+                } elseif ($isUp) {
+                    $stateClass = 'edbw-dot-yellow';
+                    $stateText = $this->isFa ? 'بدون ترافیک' : 'Idle';
+                }
+                $name = trim((string) ($r['connected_port_label'] ?? ''));
+                if ($name === '') {
+                    $name = trim((string) ($r['name'] ?? ''));
+                }
+                if ($name === '') {
+                    $name = '#' . trim((string) ($r['port_id'] ?? '-'));
+                }
+                $lines[] = '<div class="edbw-port-line"><span class="edbw-dot ' . $stateClass . '"></span><span class="edbw-port-name">' . htmlspecialchars($name) . '</span><span class="edbw-port-state">(' . htmlspecialchars($stateText) . ')</span></div>';
+            }
+        }
+
+        $html = '<div class="edbw-port-summary">' . htmlspecialchars($summary !== '' ? $summary : $this->t('no_data')) . '</div>';
+        if (!empty($lines)) {
+            $html .= '<div class="edbw-port-list">' . implode('', $lines) . '</div>';
+        }
+        return $html;
     }
 
     private function isNetworkPortCandidate(string $name, string $description, string $type): bool

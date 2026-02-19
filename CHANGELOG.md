@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.63] - 2026-02-19
+### Added
+- Ports status now shows per-port lines with visual state dots:
+  - green: up with traffic
+  - yellow: up but idle
+  - red: down/inactive
+- Connected port label/name is now shown in status details when available from EasyDCIM payload.
+### Changed
+- Unassigned/non-connected port rows are filtered from visual list when connected rows exist, so only actionable connected ports stay visible.
+- Port-row detection/parsing was hardened to avoid non-port objects being miscounted as ports in order-details fallback payloads.
+
 ## [1.62] - 2026-02-19
 ### Changed
 - Servers `Test All` flow is now AJAX-driven (no full page refresh on each batch step).

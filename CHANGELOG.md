@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.90] - 2026-02-19
+### Fixed
+- Port discovery now prefers the actual `data` payload from EasyDCIM admin responses (instead of parsing wrapper metadata), reducing false `No ports found` results.
+- Added stronger port parsing for real-world order/server payload structures:
+  - supports `selected_port`, `connected_port`, and `connected_item` blocks/strings
+  - extracts IDs from labels like `#1070 ...` / `#1014 ...`
+  - improves `connected_port_label` and status derivation (`Up/Idle/Down`).
+- Added new server-details fallback (`/api/v3/admin/servers/{id}` and related item endpoints) when direct ports endpoints are unavailable.
+- Cached unsupported order-ports endpoints to avoid repeated 404 probes on every test and reduce bulk-test latency.
+- Added richer debug context (`port_paths`) in `resolved_ports_from_order_empty` logs for faster troubleshooting on edge payloads.
+
 ## [1.89] - 2026-02-19
 ### Fixed
 - Added new server-port fallback through `/api/v3/admin/ports` with `item_id` search when direct server/order port endpoints are unavailable.

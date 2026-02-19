@@ -73,6 +73,16 @@ final class EasyDcimClient
             $best = $adminListResponse;
         }
 
+        // Final fallback: some installations expose ports only inside server/item details payload.
+        $detailsResponse = $this->serverDetailsById($serverId);
+        $detailsCode = (int) ($detailsResponse['http_code'] ?? 0);
+        if ($detailsCode >= 200 && $detailsCode < 300) {
+            return $detailsResponse;
+        }
+        if ($detailsCode > (int) ($best['http_code'] ?? 0)) {
+            $best = $detailsResponse;
+        }
+
         return $best;
     }
 
@@ -165,6 +175,35 @@ final class EasyDcimClient
             $response = $this->request('GET', '/api/v3/admin/ports', null, null, false, 5, $query);
             $code = (int) ($response['http_code'] ?? 0);
             if ($code >= 200 && $code < 300 && $this->responseContainsRows((array) ($response['data'] ?? []))) {
+                return $response;
+            }
+            if ($code > (int) ($best['http_code'] ?? 0)) {
+                $best = $response;
+            }
+        }
+
+        return $best;
+    }
+
+    public function serverDetailsById(string $serverId): array
+    {
+        $serverId = trim($serverId);
+        if ($serverId === '') {
+            return ['http_code' => 0, 'data' => [], 'raw' => null, 'error' => 'missing_server_id'];
+        }
+
+        $candidates = [
+            '/api/v3/admin/servers/' . rawurlencode($serverId),
+            '/api/v3/admin/items/' . rawurlencode($serverId),
+            '/api/v3/client/servers/' . rawurlencode($serverId),
+            '/api/v3/client/items/' . rawurlencode($serverId),
+        ];
+
+        $best = ['http_code' => 404, 'data' => [], 'raw' => null, 'error' => 'No server details endpoint matched'];
+        foreach ($candidates as $path) {
+            $response = $this->request('GET', $path, null, null, false, 5);
+            $code = (int) ($response['http_code'] ?? 0);
+            if ($code >= 200 && $code < 300) {
                 return $response;
             }
             if ($code > (int) ($best['http_code'] ?? 0)) {

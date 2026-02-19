@@ -22,6 +22,7 @@ final class AdminController
     private array $orderDetailsRuntimeCache = [];
     private array $orderPortsRuntimeCache = [];
     private array $orderServiceRuntimeCache = [];
+    private ?bool $orderPortsEndpointSupported = null;
 
     public function __construct(Settings $settings, Logger $logger, string $moduleDir)
     {
@@ -3408,11 +3409,11 @@ final class AdminController
         $result = ['ok' => false, 'reachable' => false, 'items' => []];
         try {
             $details = $this->getOrderDetailsCached($client, $orderId);
-            $data = (array) ($details['data'] ?? []);
+            $data = $this->extractApiDataPayload($details);
             $httpCode = (int) ($details['http_code'] ?? 0);
             $reachable = $httpCode >= 200 && $httpCode < 300;
             $items = $this->extractPortsRecursive($data);
-            if (empty($items) && $reachable) {
+            if (empty($items) && $reachable && $this->shouldTryOrderPortsEndpoint()) {
                 $orderPortsResp = $client->orderPorts($orderId, true);
                 $orderPortsCode = (int) ($orderPortsResp['http_code'] ?? 0);
                 if ($orderPortsCode >= 200 && $orderPortsCode < 300) {
@@ -3426,8 +3427,11 @@ final class AdminController
                         ]);
                         $result = ['ok' => true, 'reachable' => true, 'items' => $items];
                         $this->orderPortsRuntimeCache[$orderId] = $result;
+                        $this->setOrderPortsEndpointSupported(true);
                         return $result;
                     }
+                } elseif ($orderPortsCode === 404) {
+                    $this->setOrderPortsEndpointSupported(false);
                 }
             }
             if (!empty($items)) {
@@ -3444,7 +3448,33 @@ final class AdminController
                 'order_id' => $orderId,
                 'http_code' => $httpCode,
                 'top_keys' => array_slice(array_values(array_map(static fn ($k): string => (string) $k, array_keys($data))), 0, 25),
+                'port_paths' => $this->findPortLikePaths($data, 18),
             ]);
+            if (empty($items) && $reachable) {
+                $serverId = trim((string) ($data['related_id'] ?? $data['server_id'] ?? $data['item_id'] ?? ''));
+                if ($serverId === '' && isset($data['related']) && is_array($data['related'])) {
+                    $serverId = trim((string) ($data['related']['id'] ?? $data['related']['server_id'] ?? $data['related']['item_id'] ?? ''));
+                }
+                if ($serverId !== '') {
+                    $serverDetailsResp = $client->serverDetailsById($serverId);
+                    $serverDetailsCode = (int) ($serverDetailsResp['http_code'] ?? 0);
+                    if ($serverDetailsCode >= 200 && $serverDetailsCode < 300) {
+                        $serverDetailsData = $this->extractApiDataPayload($serverDetailsResp);
+                        $serverItems = $this->extractPortsRecursive($serverDetailsData);
+                        if (!empty($serverItems)) {
+                            $this->logger->log('INFO', 'resolved_ports_from_server_details', [
+                                'order_id' => $orderId,
+                                'server_id' => $serverId,
+                                'count' => count($serverItems),
+                                'http_code' => $serverDetailsCode,
+                            ]);
+                            $result = ['ok' => true, 'reachable' => true, 'items' => $serverItems];
+                            $this->orderPortsRuntimeCache[$orderId] = $result;
+                            return $result;
+                        }
+                    }
+                }
+            }
             $result = ['ok' => false, 'reachable' => $reachable, 'items' => []];
         } catch (\Throwable $e) {
             $this->logger->log('WARNING', 'resolve_ports_from_order_failed', [
@@ -3456,36 +3486,82 @@ final class AdminController
         return $result;
     }
 
+    private function extractApiDataPayload(array $response): array
+    {
+        $decoded = (array) ($response['data'] ?? []);
+        if (isset($decoded['data']) && is_array($decoded['data'])) {
+            return (array) $decoded['data'];
+        }
+        return $decoded;
+    }
+
+    private function shouldTryOrderPortsEndpoint(): bool
+    {
+        if ($this->orderPortsEndpointSupported !== null) {
+            return $this->orderPortsEndpointSupported;
+        }
+
+        $raw = (string) Capsule::table('mod_easydcim_bw_guard_meta')
+            ->where('meta_key', 'order_ports_endpoint_supported')
+            ->value('meta_value');
+        if ($raw === '0') {
+            $this->orderPortsEndpointSupported = false;
+            return false;
+        }
+        if ($raw === '1') {
+            $this->orderPortsEndpointSupported = true;
+            return true;
+        }
+        $this->orderPortsEndpointSupported = true;
+        return true;
+    }
+
+    private function setOrderPortsEndpointSupported(bool $supported): void
+    {
+        $this->orderPortsEndpointSupported = $supported;
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'order_ports_endpoint_supported'],
+            ['meta_value' => $supported ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
+        );
+    }
+
+    private function findPortLikePaths($value, int $limit = 20, string $path = ''): array
+    {
+        $found = [];
+        $walk = function ($node, string $nodePath) use (&$walk, &$found, $limit): void {
+            if (count($found) >= $limit) {
+                return;
+            }
+            if (is_array($node)) {
+                foreach ($node as $k => $child) {
+                    if (count($found) >= $limit) {
+                        return;
+                    }
+                    $key = is_string($k) ? $k : '[' . $k . ']';
+                    $childPath = $nodePath === '' ? $key : $nodePath . '.' . $key;
+                    $keyLower = strtolower((string) $k);
+                    if (is_string($k) && preg_match('/port|interface|connection|uplink|ethernet/i', $keyLower)) {
+                        $found[] = $childPath;
+                    }
+                    $walk($child, $childPath);
+                }
+                return;
+            }
+            if (is_string($node) && preg_match('/#\\d+\\s+.*(port|ethernet|gig|eth)/i', $node)) {
+                $found[] = $nodePath . '="' . substr($node, 0, 70) . '"';
+            }
+        };
+        $walk($value, $path);
+        return array_values(array_unique($found));
+    }
+
     private function extractPortsRecursive($value, string $parentKey = ''): array
     {
         $result = [];
         if (is_array($value)) {
-            $looksLikePort = $this->isLikelyPortRow($value, $parentKey);
-
-            if ($looksLikePort) {
-                $portId = trim((string) ($value['port_id'] ?? $value['portId'] ?? $value['portid'] ?? $value['id'] ?? ''));
-                $name = (string) ($value['name'] ?? $value['label'] ?? $value['port'] ?? $value['interface'] ?? $value['connected_port_label'] ?? $value['connected_port_name'] ?? 'port');
-                if ($portId !== '' && !str_contains($name, '#' . $portId)) {
-                    $name = '#' . $portId . ' ' . $name;
-                }
-                $status = strtolower((string) ($value['status'] ?? $value['state'] ?? $value['admin_state'] ?? $value['oper_state'] ?? ''));
-                $isUp = in_array($status, ['up', 'active', 'enabled', 'online', 'accepted'], true)
-                    || ((int) ($value['is_up'] ?? $value['up'] ?? $value['is_active'] ?? $value['enabled'] ?? 0) === 1);
-                $traffic = (float) ($value['traffic_total'] ?? $value['total'] ?? $value['usage'] ?? $value['total_1m'] ?? 0.0);
-                $connectedItemId = trim((string) ($value['connected_item_id'] ?? $value['conn_item_id'] ?? $value['conn_item'] ?? $value['item_id'] ?? ''));
-                $connectedPortId = trim((string) ($value['connected_port_id'] ?? $value['conn_port_id'] ?? $value['connected_port_id'] ?? $value['conn_port'] ?? ''));
-                $connectedLabel = trim((string) ($value['connected_port_label'] ?? $value['connected_port_name'] ?? $value['connected_port'] ?? $value['conn_port_label'] ?? $value['conn_port_name'] ?? ''));
-                $result[] = [
-                    'name' => $name,
-                    'description' => (string) ($value['description'] ?? ''),
-                    'type' => (string) ($value['type'] ?? ''),
-                    'is_up' => $isUp,
-                    'traffic_total' => $traffic,
-                    'port_id' => $portId,
-                    'connected_item_id' => $connectedItemId,
-                    'connected_port_id' => $connectedPortId,
-                    'connected_port_label' => $connectedLabel,
-                ];
+            $parsed = $this->parsePortRow($value, $parentKey);
+            if ($parsed !== null) {
+                $result[] = $parsed;
             }
 
             foreach ($value as $k => $child) {
@@ -3498,6 +3574,129 @@ final class AdminController
             }
         }
         return $result;
+    }
+
+    private function parsePortRow(array $row, string $parentKey = ''): ?array
+    {
+        if (!$this->isLikelyPortRow($row, $parentKey)) {
+            return null;
+        }
+
+        $selectedPort = $this->extractMixedRef($row['selected_port'] ?? $row['selectedPort'] ?? $row['port'] ?? $row['interface'] ?? null);
+        $connectedPort = $this->extractMixedRef($row['connected_port'] ?? $row['connectedPort'] ?? $row['conn_port'] ?? null);
+        $connectedItem = $this->extractMixedRef($row['connected_item'] ?? $row['connectedItem'] ?? $row['connection_item'] ?? $row['conn_item'] ?? null);
+
+        $portId = trim((string) ($row['port_id'] ?? $row['portId'] ?? $row['portid'] ?? $row['id'] ?? $selectedPort['id'] ?? ''));
+        $name = trim((string) ($row['name'] ?? $row['label'] ?? $row['user_label'] ?? $row['description'] ?? ''));
+        if ($name === '') {
+            $name = trim((string) ($selectedPort['label'] ?? $connectedPort['label'] ?? $row['connected_port_label'] ?? $row['connected_port_name'] ?? ''));
+        }
+        if ($name === '' && $portId !== '') {
+            $name = '#' . $portId;
+        } elseif ($name !== '' && $portId !== '' && !str_contains($name, '#' . $portId)) {
+            $name = '#' . $portId . ' ' . $name;
+        }
+        if ($name === '') {
+            $name = 'port';
+        }
+
+        $status = strtolower(trim((string) ($row['status'] ?? $row['state'] ?? $row['admin_state'] ?? $row['oper_state'] ?? $row['adminState'] ?? '')));
+        if ($status === '' && isset($selectedPort['state']) && is_string($selectedPort['state'])) {
+            $status = strtolower(trim((string) $selectedPort['state']));
+        }
+        $upRaw = $row['is_up'] ?? $row['up'] ?? $row['is_active'] ?? $row['enabled'] ?? null;
+        $isUp = false;
+        if (is_bool($upRaw)) {
+            $isUp = $upRaw;
+        } elseif (is_numeric($upRaw)) {
+            $isUp = (int) $upRaw === 1;
+        } elseif (is_string($upRaw) && trim($upRaw) !== '') {
+            $isUp = in_array(strtolower(trim($upRaw)), ['1', 'true', 'up', 'active', 'enabled', 'online', 'accepted'], true);
+        } else {
+            $isUp = in_array($status, ['up', 'active', 'enabled', 'online', 'accepted'], true);
+        }
+
+        $trafficTotal = $this->extractTrafficTotal($row);
+        $connectedPortId = trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['port_connection_id'] ?? $connectedPort['id'] ?? ''));
+        $connectedItemId = trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['connection_item_id'] ?? $connectedItem['id'] ?? ''));
+        $connectedPortLabel = trim((string) ($row['connected_port_label'] ?? $row['connected_port_name'] ?? $connectedPort['label'] ?? ''));
+
+        return [
+            'name' => $name,
+            'description' => (string) ($row['description'] ?? ''),
+            'type' => (string) ($row['type'] ?? $row['port_type'] ?? ''),
+            'is_up' => $isUp,
+            'traffic_total' => $trafficTotal,
+            'port_id' => $portId,
+            'connected_item_id' => $connectedItemId,
+            'connected_port_id' => $connectedPortId,
+            'connected_port_label' => $connectedPortLabel,
+        ];
+    }
+
+    private function extractMixedRef($value): array
+    {
+        $id = '';
+        $label = '';
+        $state = '';
+
+        if (is_array($value)) {
+            $id = trim((string) ($value['id'] ?? $value['port_id'] ?? $value['item_id'] ?? $value['related_id'] ?? ''));
+            $label = trim((string) ($value['name'] ?? $value['label'] ?? $value['description'] ?? $value['title'] ?? ''));
+            $state = trim((string) ($value['status'] ?? $value['state'] ?? $value['admin_state'] ?? $value['oper_state'] ?? ''));
+            if ($id === '' && $label !== '' && preg_match('/#\\s*(\\d+)/', $label, $m)) {
+                $id = trim((string) $m[1]);
+            }
+            return ['id' => $id, 'label' => $label, 'state' => $state];
+        }
+
+        if (!is_scalar($value)) {
+            return ['id' => '', 'label' => '', 'state' => ''];
+        }
+
+        $text = trim((string) $value);
+        if ($text === '') {
+            return ['id' => '', 'label' => '', 'state' => ''];
+        }
+        if (preg_match('/#\\s*(\\d+)/', $text, $m)) {
+            $id = trim((string) $m[1]);
+        }
+        return ['id' => $id, 'label' => $text, 'state' => ''];
+    }
+
+    private function extractTrafficTotal(array $row): float
+    {
+        if (isset($row['traffic_total']) && is_numeric($row['traffic_total'])) {
+            return (float) $row['traffic_total'];
+        }
+        if (isset($row['total']) && is_numeric($row['total'])) {
+            return (float) $row['total'];
+        }
+        if (isset($row['usage']) && is_numeric($row['usage'])) {
+            return (float) $row['usage'];
+        }
+        if (isset($row['total_1m']) && is_numeric($row['total_1m'])) {
+            return (float) $row['total_1m'];
+        }
+        if (isset($row['traffic']) && is_array($row['traffic'])) {
+            foreach (['total', 'total_1m', 'usage', 'sum', 'value'] as $k) {
+                if (isset($row['traffic'][$k]) && is_numeric($row['traffic'][$k])) {
+                    return (float) $row['traffic'][$k];
+                }
+            }
+            $sum = 0.0;
+            $seen = false;
+            foreach (['in', 'out', 'rx', 'tx', 'download', 'upload'] as $k) {
+                if (isset($row['traffic'][$k]) && is_numeric($row['traffic'][$k])) {
+                    $sum += (float) $row['traffic'][$k];
+                    $seen = true;
+                }
+            }
+            if ($seen) {
+                return $sum;
+            }
+        }
+        return 0.0;
     }
 
     private function resolveServiceIdFromOrder(EasyDcimClient $client, string $orderId, bool $allowClientScan = true): string
@@ -3521,7 +3720,7 @@ final class AdminController
         }
         try {
             $details = $this->getOrderDetailsCached($client, $orderId);
-            $data = (array) ($details['data'] ?? []);
+            $data = $this->extractApiDataPayload($details);
             $id = $this->findServiceIdRecursive($data);
             if ($id !== '') {
                 Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
@@ -3751,43 +3950,11 @@ final class AdminController
             if (!is_array($row)) {
                 continue;
             }
-            if (!$this->isLikelyPortRow($row)) {
+            $parsed = $this->parsePortRow($row);
+            if ($parsed === null) {
                 continue;
             }
-            $name = (string) ($row['name'] ?? $row['label'] ?? $row['port'] ?? $row['interface'] ?? $row['connected_port_label'] ?? '');
-            $desc = (string) ($row['description'] ?? $row['note'] ?? '');
-            $type = (string) ($row['type'] ?? $row['port_type'] ?? '');
-            $portId = trim((string) ($row['port_id'] ?? $row['portId'] ?? $row['portid'] ?? $row['id'] ?? ''));
-            if ($name === '' && $portId !== '') {
-                $name = '#' . $portId;
-            } elseif ($name !== '' && $portId !== '' && !str_contains($name, '#' . $portId)) {
-                $name = '#' . $portId . ' ' . $name;
-            }
-            $state = strtolower((string) ($row['status'] ?? $row['state'] ?? $row['admin_state'] ?? $row['oper_state'] ?? ''));
-            $upRaw = $row['is_up'] ?? $row['up'] ?? null;
-            $isUp = false;
-            if (is_bool($upRaw)) {
-                $isUp = $upRaw;
-            } elseif (is_numeric($upRaw)) {
-                $isUp = (int) $upRaw === 1;
-            } elseif (is_string($upRaw) && $upRaw !== '') {
-                $isUp = in_array(strtolower($upRaw), ['1', 'true', 'up', 'active', 'enabled', 'online'], true);
-            } else {
-                $isUp = in_array($state, ['up', 'active', 'enabled', 'online', 'accepted'], true);
-            }
-            $trafficTotal = (float) ($row['traffic_total'] ?? $row['total'] ?? $row['total_1m'] ?? $row['usage'] ?? 0.0);
-            $connectedPortLabel = trim((string) ($row['connected_port_label'] ?? $row['connected_port_name'] ?? $row['connected_port'] ?? $row['conn_port_label'] ?? $row['conn_port_name'] ?? ''));
-            $out[] = [
-                'name' => $name,
-                'description' => $desc,
-                'type' => $type,
-                'is_up' => $isUp,
-                'traffic_total' => $trafficTotal,
-                'port_id' => $portId,
-                'connected_item_id' => trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['conn_item'] ?? $row['item_id'] ?? '')),
-                'connected_port_id' => trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['connected_port_id'] ?? $row['conn_port'] ?? '')),
-                'connected_port_label' => $connectedPortLabel,
-            ];
+            $out[] = $parsed;
         }
 
         if (empty($out)) {
@@ -3800,27 +3967,56 @@ final class AdminController
     private function isLikelyPortRow(array $row, string $parentKey = ''): bool
     {
         $keys = array_map(static fn ($k): string => strtolower((string) $k), array_keys($row));
+        $entityOnlyKeys = ['order_id', 'service_id', 'userid', 'client_id', 'product_id', 'packageid', 'domainstatus'];
+        $entityHits = 0;
+        foreach ($entityOnlyKeys as $k) {
+            if (in_array($k, $keys, true)) {
+                $entityHits++;
+            }
+        }
         $portKeys = [
             'port', 'port_id', 'portid', 'interface', 'port_type',
             'number', 'port_number', 'user_label', 'connection', 'connection_item',
+            'selected_port', 'selectedport', 'connected_port', 'connectedport', 'connected_item', 'connecteditem',
             'connected_port_id', 'conn_port_id', 'conn_port',
             'connected_item_id', 'conn_item_id', 'conn_item',
             'connected_port_label', 'connected_port_name',
             'admin_state', 'oper_state', 'speed', 'vlan', 'vlans', 'duplex',
         ];
+        $portHit = 0;
         foreach ($portKeys as $k) {
             if (in_array($k, $keys, true)) {
-                return true;
+                $portHit++;
             }
+        }
+        if ($portHit > 0) {
+            return true;
+        }
+        if ($entityHits >= 2) {
+            return false;
         }
         if (in_array($parentKey, ['ports', 'port', 'portconnections', 'connections', 'interfaces', 'networkinterfaces', 'switchports', 'uplinks', 'links'], true)) {
             if (isset($row['id']) || isset($row['name']) || isset($row['label']) || isset($row['number'])) {
                 return true;
             }
         }
+        if ($parentKey !== '' && preg_match('/port|interface|connection|uplink|switch/i', $parentKey)) {
+            if (isset($row['id']) || isset($row['name']) || isset($row['label']) || isset($row['number']) || isset($row['description'])) {
+                return true;
+            }
+        }
         $label = strtolower(trim((string) ($row['name'] ?? $row['label'] ?? $row['description'] ?? '')));
         if ($label !== '' && preg_match('/(port|ethernet|gig|gi\\d|te\\d|eth\\d)/i', $label)) {
             return true;
+        }
+        foreach (['selected_port', 'connected_port', 'connected_item'] as $mixedKey) {
+            if (!isset($row[$mixedKey])) {
+                continue;
+            }
+            $ref = $this->extractMixedRef($row[$mixedKey]);
+            if ($ref['id'] !== '' || $ref['label'] !== '') {
+                return true;
+            }
         }
         return false;
     }

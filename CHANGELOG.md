@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.91] - 2026-02-19
+### Fixed
+- Servers batch test flow is now fully form-based (no fragile AJAX fallback chain), so `Stop`/`Reset` actions reliably clear queue state.
+- Batch processing size was increased to 5 services per click to reduce repeated manual steps while keeping request load controlled.
+- Port status rendering now enriches rows with `GET /api/v3/admin/ports/{id}` details when available:
+  - better port display labels
+  - speed badge extraction (`1G`/`10G` when provided)
+  - improved state normalization (`Up/Idle/Down`).
+### Added
+- New **Traffic** admin tab to view per-service usage/remaining/effective limit, cycle window, and last check time in one table.
+
 ## [1.90] - 2026-02-19
 ### Fixed
 - Port discovery now prefers the actual `data` payload from EasyDCIM admin responses (instead of parsing wrapper metadata), reducing false `No ports found` results.

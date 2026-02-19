@@ -86,6 +86,15 @@ final class EasyDcimClient
         return $best;
     }
 
+    public function portDetails(string $portId): array
+    {
+        $portId = trim($portId);
+        if ($portId === '') {
+            return ['http_code' => 0, 'data' => [], 'raw' => null, 'error' => 'missing_port_id'];
+        }
+        return $this->request('GET', '/api/v3/admin/ports/' . rawurlencode($portId), null, null, false, 5);
+    }
+
     public function disablePort(string $portId): array
     {
         return $this->request('POST', '/api/v3/admin/ports/' . rawurlencode($portId) . '/disable');

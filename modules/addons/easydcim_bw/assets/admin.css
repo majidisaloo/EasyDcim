@@ -300,7 +300,11 @@
 .edbw-port-line {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 6px;
+  max-width: 100%;
+  line-height: 1.35;
 }
 
 .edbw-dot {
@@ -327,6 +331,21 @@
 
 .edbw-port-name {
   font-weight: 600;
+  max-width: 360px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.edbw-port-speed {
+  display: inline-block;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  line-height: 1.4;
 }
 
 .edbw-port-state {

@@ -22,6 +22,7 @@ final class AdminController
     private array $orderDetailsRuntimeCache = [];
     private array $orderPortsRuntimeCache = [];
     private array $orderServiceRuntimeCache = [];
+    private array $portDetailsRuntimeCache = [];
     private ?bool $orderPortsEndpointSupported = null;
 
     public function __construct(Settings $settings, Logger $logger, string $moduleDir)
@@ -270,6 +271,8 @@ final class AdminController
             $this->renderHealthTab();
         } elseif ($tab === 'servers') {
             $this->renderServersTab();
+        } elseif ($tab === 'traffic') {
+            $this->renderTrafficTab();
         } elseif ($tab === 'packages') {
             $this->renderPackagesTab();
         } elseif ($tab === 'logs') {
@@ -289,6 +292,7 @@ final class AdminController
             'settings' => $this->t('tab_settings'),
             'scope' => $this->t('tab_scope'),
             'servers' => $this->t('tab_servers'),
+            'traffic' => $this->t('tab_traffic'),
             'packages' => $this->t('tab_packages'),
             'health' => $this->t('tab_health'),
             'logs' => $this->t('tab_logs'),
@@ -570,116 +574,52 @@ final class AdminController
             $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_at')->value('meta_value');
             echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_cache_at')) . ': ' . htmlspecialchars($cacheAt !== '' ? $cacheAt : $this->t('m_no_data')) . '</p>';
             echo '<div class="edbw-server-actions">';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-refresh-cache-form">';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="refresh_servers_cache">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_refresh_cache')) . '</button>';
             echo '</form>';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-form">';
-            echo '<input type="hidden" name="tab" value="servers">';
-            echo '<input type="hidden" name="action" value="test_all_services">';
-            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all')) . '</button>';
-            echo '</form>';
             $testAllState = $this->getTestAllState();
             $runningNow = ((int) ($testAllState['remaining'] ?? 0) > 0)
                 || ((int) ($testAllState['total'] ?? 0) > (int) ($testAllState['done'] ?? 0));
-            echo '<form method="post" id="edbw-test-all-continue-form" class="edbw-form-inline edbw-action-card" style="' . ($runningNow ? '' : 'display:none;') . '">';
-            echo '<input type="hidden" name="tab" value="servers">';
-            echo '<input type="hidden" name="action" value="test_all_services">';
-            echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
-            echo '</form>';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-stop-form">';
-            echo '<input type="hidden" name="tab" value="servers">';
-            echo '<input type="hidden" name="action" value="stop_test_all_services">';
-            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_stop')) . '</button>';
-            echo '</form>';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-reset-form">';
-            echo '<input type="hidden" name="tab" value="servers">';
-            echo '<input type="hidden" name="action" value="reset_test_all_services">';
-            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_reset')) . '</button>';
-            echo '</form>';
-            echo '<div class="alert alert-info" id="edbw-test-all-progress" style="' . ($runningNow ? '' : 'display:none;') . '">';
-            echo htmlspecialchars($this->t('servers_test_all_progress')) . ': '
-                . (int) ($testAllState['done'] ?? 0) . '/' . (int) ($testAllState['total'] ?? 0)
-                . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
-                . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
-                . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')';
+            if ($runningNow) {
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<input type="hidden" name="tab" value="servers">';
+                echo '<input type="hidden" name="action" value="test_all_services">';
+                echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
+                echo '</form>';
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<input type="hidden" name="tab" value="servers">';
+                echo '<input type="hidden" name="action" value="stop_test_all_services">';
+                echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_stop')) . '</button>';
+                echo '</form>';
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<input type="hidden" name="tab" value="servers">';
+                echo '<input type="hidden" name="action" value="reset_test_all_services">';
+                echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_reset')) . '</button>';
+                echo '</form>';
+            } else {
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<input type="hidden" name="tab" value="servers">';
+                echo '<input type="hidden" name="action" value="test_all_services">';
+                echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all')) . '</button>';
+                echo '</form>';
+            }
             echo '</div>';
-            echo '<div id="edbw-test-all-status" class="edbw-help"></div>';
-            echo '</div>';
+            if ($runningNow) {
+                echo '<div class="alert alert-info">';
+                echo htmlspecialchars($this->t('servers_test_all_progress')) . ': '
+                    . (int) ($testAllState['done'] ?? 0) . '/' . (int) ($testAllState['total'] ?? 0)
+                    . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
+                    . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
+                    . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')';
+                echo '</div>';
+            }
             if (count($easyServices) === 0 && $cacheAt === '') {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
             } elseif (count($easyServices) === 0) {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_empty_hint')) . '</div>';
             }
-            echo '<script>(function(){'
-                . 'var initTotal=' . (int) ($testAllState['total'] ?? 0) . ';'
-                . 'var initDone=' . (int) ($testAllState['done'] ?? 0) . ';'
-                . 'var running=' . ($runningNow ? 'true' : 'false') . ' || (initTotal>initDone);var timer=null;var lastDone=initDone;var noProgressTicks=0;'
-                . 'var formTest=document.getElementById("edbw-test-all-form");'
-                . 'var formCont=document.getElementById("edbw-test-all-continue-form");'
-                . 'var formStop=document.getElementById("edbw-test-all-stop-form");'
-                . 'var formReset=document.getElementById("edbw-test-all-reset-form");'
-                . 'var formRefresh=document.getElementById("edbw-refresh-cache-form");'
-                . 'var progress=document.getElementById("edbw-test-all-progress");'
-                . 'var status=document.getElementById("edbw-test-all-status");'
-                . 'var baseUrl=(formTest&&formTest.action)?formTest.action:window.location.href;'
-                . 'var uFallback=new URL(window.location.href);uFallback.searchParams.set("module","easydcim_bw");uFallback.searchParams.set("tab","servers");uFallback.searchParams.set("api","servers_batch");uFallback.searchParams.delete("action");'
-                . 'var apiUrlFallback=uFallback.pathname+"?"+uFallback.searchParams.toString();'
-                . 'function parsePayload(txt){try{return JSON.parse(txt);}catch(e){return null;}}'
-                . 'function errPayload(txt){var raw=((txt||"")+"").replace(/\\s+/g," ").trim().slice(0,180);return {type:"danger",message:"' . addslashes($this->t('servers_test_all_failed')) . ( $this->isFa ? ' - پاسخ نامعتبر سرور' : ' - invalid server response') . '",raw:raw,state:{running:false,total:0,done:0,ok:0,warn:0,fail:0,remaining:0}};}'
-                . 'function postAjax(url,fields){var fd=new FormData();Object.keys(fields||{}).forEach(function(k){fd.append(k,fields[k]);});'
-                . 'var tokenInput=document.querySelector("input[name=\\"token\\"]");if(tokenInput&&tokenInput.value){fd.append("token",tokenInput.value);}'
-                . 'try{var ut=new URL(window.location.href);var t=ut.searchParams.get("token");if(t){fd.append("token",t);}}catch(_e){}'
-                . 'if(!fd.get("module")){fd.append("module","easydcim_bw");}'
-                . 'if(!fd.get("tab")){fd.append("tab","servers");}'
-                . 'return fetch(url,{method:"POST",body:fd,credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}}).then(function(r){return r.text();});}'
-                . 'function submitFallback(action){try{var f=document.createElement("form");f.method="POST";f.action=window.location.href;var fields={tab:"servers",action:action};Object.keys(fields).forEach(function(k){var i=document.createElement("input");i.type="hidden";i.name=k;i.value=fields[k];f.appendChild(i);});var t1=document.querySelector("input[name=\\"token\\"]");if(t1&&t1.value){var ti=document.createElement("input");ti.type="hidden";ti.name="token";ti.value=t1.value;f.appendChild(ti);}document.body.appendChild(f);f.submit();}catch(_e){window.location.reload();}}'
-                . 'function pauseWithMessage(msg,isErr){running=false;setRunning(false);if(timer){clearTimeout(timer);timer=null;}if(status&&msg){status.textContent=msg;status.style.color=(isErr?"#b91c1c":"#b45309");}}'
-                . 'function call(op){'
-                . 'var actionMap={test:"test_all_services",stop:"stop_test_all_services",reset:"reset_test_all_services",refresh:"refresh_servers_cache"};'
-                . 'var action=(actionMap[op]||"test_all_services");'
-                . 'return postAjax(apiUrlFallback,{ajax:"1",tab:"servers",op:op,_:String(Date.now())})'
-                . '.then(function(txt){var p=parsePayload(txt);if(p){return p;}'
-                . 'return postAjax(baseUrl,{ajax:"1",tab:"servers",action:action,_:String(Date.now())})'
-                . '.then(function(txt2){var p2=parsePayload(txt2);return p2||errPayload(txt2||txt);})'
-                . '.catch(function(){return errPayload(txt);});'
-                . '});}'
-                . 'function setRunning(v){running=!!v;'
-                . 'if(formCont){formCont.style.display=running?"":"none";}'
-                . 'if(formStop){formStop.style.display="";}'
-                . 'if(formReset){formReset.style.display="";}'
-                . '}'
-                . 'function render(payload){'
-                . 'if(!payload){return;}'
-                . 'if(status && payload.message && !payload.silent){var msg=payload.message;if(payload.raw){msg=msg+" ["+payload.raw+"]";}status.textContent=msg;status.style.color=(payload.type==="danger"?"#b91c1c":(payload.type==="warning"?"#b45309":"#0f766e"));}'
-                . 'if(payload.state && progress){'
-                . 'if(payload.state.running){progress.style.display="block";progress.textContent="' . addslashes($this->t('servers_test_all_progress')) . ': "+payload.state.done+"/"+payload.state.total+" (OK: "+payload.state.ok+", WARN: "+payload.state.warn+", FAIL: "+payload.state.fail+")";}'
-                . 'else{progress.style.display="none";}'
-                . '}'
-                . 'setRunning(!!(payload.state && (payload.state.running || ((payload.state.total||0)>(payload.state.done||0)))));'
-                . 'if(payload.state){var d=(payload.state.done||0);if(d>lastDone){lastDone=d;noProgressTicks=0;}else if(running){noProgressTicks++;}}'
-                . '}'
-                . 'function tick(){if(!running){return;}'
-                . 'call("test").then(function(j){render(j);'
-                . 'var expectedWork=(initTotal>initDone)||(j&&j.state&&((j.state.total||0)>(j.state.done||0)));'
-                . 'var invalidState=(!j||!j.state||(((j.state.total||0)===0)&&((j.state.done||0)===0)&&expectedWork));'
-                . 'if(noProgressTicks>=5){pauseWithMessage("' . addslashes($this->t('servers_test_all_progress')) . ' - ' . addslashes($this->t('servers_test_all_continue')) . '",false);return;}'
-                . 'if(invalidState||(j&&j.type==="danger"&&expectedWork)){pauseWithMessage((j&&j.message)?j.message:"' . addslashes($this->t('servers_test_all_failed')) . '",true);if(expectedWork){submitFallback("test_all_services");}return;}'
-                . 'if(j && j.state && ((j.state.running)||((j.state.total||0)>(j.state.done||0))) && running){timer=setTimeout(tick,700);}else if(expectedWork){pauseWithMessage("' . addslashes($this->t('servers_test_all_progress')) . ' - ' . addslashes($this->t('servers_test_all_continue')) . '",false);}else{running=false;setRunning(false);}})'
-                . '.catch(function(){pauseWithMessage("' . addslashes($this->t('servers_test_all_failed')) . '",true);submitFallback("test_all_services");});}'
-                . 'function bindActions(){'
-                . 'if(formTest){formTest.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}running=true;setRunning(true);noProgressTicks=0;call("test").then(function(j){render(j);if(!j||!j.state){submitFallback("test_all_services");return;}if(running){timer=setTimeout(tick,700);}}).catch(function(){pauseWithMessage("' . addslashes($this->t('servers_test_all_failed')) . '",true);submitFallback("test_all_services");});});}'
-                . 'if(formCont){formCont.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}running=true;setRunning(true);noProgressTicks=0;tick();});}'
-                . 'if(formStop){formStop.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}call("stop").then(function(j){render(j);running=false;setRunning(false);});});}'
-                . 'if(formReset){formReset.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}call("reset").then(function(j){render(j);running=false;setRunning(false);});});}'
-                . 'if(formRefresh){formRefresh.addEventListener("submit",function(ev){ev.preventDefault();call("refresh").then(function(j){render(j);});});}'
-                . '}'
-                . 'bindActions();'
-                . 'setRunning(running);'
-                . 'if(!running && initTotal>initDone){running=true;setRunning(true);}'
-                . 'if(running){timer=setTimeout(tick,700);}'
-                . '})();</script>';
         }
         echo '</div>';
 
@@ -1014,6 +954,84 @@ final class AdminController
         }
         echo '</tbody></table>';
         echo '</div>';
+        echo '</div>';
+    }
+
+    private function renderTrafficTab(): void
+    {
+        $q = Capsule::table('mod_easydcim_bw_guard_service_state as s')
+            ->join('tblhosting as h', 'h.id', '=', 's.serviceid')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
+            ->whereIn('h.domainstatus', ['Active', 'Suspended'])
+            ->select([
+                's.serviceid',
+                's.userid',
+                'h.packageid as pid',
+                's.last_used_gb',
+                's.last_remaining_gb',
+                's.last_status',
+                's.last_check_at',
+                's.cycle_start',
+                's.cycle_end',
+                'c.firstname',
+                'c.lastname',
+            ]);
+        $this->applyScopeFilter($q);
+        $rows = $q->orderByDesc('s.last_check_at')->orderByDesc('s.serviceid')->limit(300)->get();
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>' . htmlspecialchars($this->t('traffic_report_title')) . '</h3>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>'
+            . htmlspecialchars($this->t('service')) . '</th><th>'
+            . htmlspecialchars($this->t('client')) . '</th><th>'
+            . htmlspecialchars($this->t('product_id')) . '</th><th>'
+            . htmlspecialchars($this->t('traffic_used_gb')) . '</th><th>'
+            . htmlspecialchars($this->t('traffic_remaining_gb')) . '</th><th>'
+            . htmlspecialchars($this->t('traffic_allowed_gb')) . '</th><th>'
+            . htmlspecialchars($this->t('traffic_cycle')) . '</th><th>'
+            . htmlspecialchars($this->t('status')) . '</th><th>'
+            . htmlspecialchars($this->t('traffic_last_check')) . '</th></tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $serviceId = (int) ($r->serviceid ?? 0);
+            $userId = (int) ($r->userid ?? 0);
+            $used = (float) ($r->last_used_gb ?? 0.0);
+            $remaining = (float) ($r->last_remaining_gb ?? 0.0);
+            $allowed = max(0.0, $used + $remaining);
+            $clientName = trim((string) ($r->firstname ?? '') . ' ' . (string) ($r->lastname ?? ''));
+            if ($clientName === '') {
+                $clientName = '#' . $userId;
+            }
+            $cycleStart = trim((string) ($r->cycle_start ?? ''));
+            $cycleEnd = trim((string) ($r->cycle_end ?? ''));
+            $cycle = $cycleStart !== '' && $cycleEnd !== ''
+                ? ($cycleStart . ' -> ' . $cycleEnd)
+                : $this->t('m_no_data');
+            $status = $this->domainStatusLabel((string) ($r->last_status ?? ''));
+            $checkedAt = trim((string) ($r->last_check_at ?? ''));
+            if ($checkedAt === '') {
+                $checkedAt = $this->t('m_no_data');
+            }
+
+            echo '<tr>';
+            echo '<td><a href="clientsservices.php?userid=' . $userId . '&id=' . $serviceId . '">#' . $serviceId . '</a></td>';
+            echo '<td><a href="clientssummary.php?userid=' . $userId . '">' . htmlspecialchars($clientName) . '</a></td>';
+            echo '<td>' . (int) ($r->pid ?? 0) . '</td>';
+            echo '<td>' . number_format($used, 2, '.', '') . '</td>';
+            echo '<td>' . number_format($remaining, 2, '.', '') . '</td>';
+            echo '<td>' . number_format($allowed, 2, '.', '') . '</td>';
+            echo '<td>' . htmlspecialchars($cycle) . '</td>';
+            echo '<td>' . htmlspecialchars($status) . '</td>';
+            echo '<td>' . htmlspecialchars($checkedAt) . '</td>';
+            echo '</tr>';
+        }
+
+        if ($rows->isEmpty()) {
+            echo '<tr><td colspan="9">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+        }
+
+        echo '</tbody></table></div>';
         echo '</div>';
     }
 
@@ -1892,7 +1910,8 @@ final class AdminController
                     continue;
                 }
                 $networkPorts++;
-                if (!empty($p['is_up'])) {
+                $portState = strtolower(trim((string) ($p['state'] ?? '')));
+                if (!empty($p['is_up']) || in_array($portState, ['up', 'idle'], true)) {
                     $networkUp++;
                 }
                 $networkTraffic += (float) ($p['traffic_total'] ?? 0.0);
@@ -1910,13 +1929,43 @@ final class AdminController
                 }
                 $portRows[] = [
                     'name' => (string) ($p['name'] ?? ''),
+                    'state' => (string) ($p['state'] ?? ''),
                     'is_up' => !empty($p['is_up']),
                     'traffic_total' => (float) ($p['traffic_total'] ?? 0.0),
+                    'speed' => (string) ($p['speed'] ?? ''),
                     'port_id' => $pid,
                     'connected_port_id' => $cpid,
                     'connected_item_id' => $ciid,
                     'connected_port_label' => (string) ($p['connected_port_label'] ?? ''),
                 ];
+            }
+            if (!empty($portRows)) {
+                $portRows = $this->enrichPortRowsWithPortDetails($client, $portRows);
+                $networkPorts = count($portRows);
+                $networkUp = 0;
+                $networkTraffic = 0.0;
+                $portIds = [];
+                $connectedPortIds = [];
+                $connectedItemIds = [];
+                foreach ($portRows as $row) {
+                    $rowState = strtolower(trim((string) ($row['state'] ?? '')));
+                    if (!empty($row['is_up']) || in_array($rowState, ['up', 'idle'], true)) {
+                        $networkUp++;
+                    }
+                    $networkTraffic += (float) ($row['traffic_total'] ?? 0.0);
+                    $pid = trim((string) ($row['port_id'] ?? ''));
+                    $cpid = trim((string) ($row['connected_port_id'] ?? ''));
+                    $ciid = trim((string) ($row['connected_item_id'] ?? ''));
+                    if ($pid !== '') {
+                        $portIds[$pid] = true;
+                    }
+                    if ($cpid !== '') {
+                        $connectedPortIds[$cpid] = true;
+                    }
+                    if ($ciid !== '') {
+                        $connectedItemIds[$ciid] = true;
+                    }
+                }
             }
 
             if (($mode === 'none' || $mode === 'server_id_only') && $err === '') {
@@ -2914,7 +2963,7 @@ final class AdminController
             if (function_exists('set_time_limit')) {
                 @set_time_limit(60);
             }
-            $chunkSize = 1;
+            $chunkSize = 5;
             $state = $this->getTestAllState();
             $queue = $state['queue'];
 
@@ -3587,46 +3636,87 @@ final class AdminController
         $connectedItem = $this->extractMixedRef($row['connected_item'] ?? $row['connectedItem'] ?? $row['connection_item'] ?? $row['conn_item'] ?? null);
 
         $portId = trim((string) ($row['port_id'] ?? $row['portId'] ?? $row['portid'] ?? $row['id'] ?? $selectedPort['id'] ?? ''));
-        $name = trim((string) ($row['name'] ?? $row['label'] ?? $row['user_label'] ?? $row['description'] ?? ''));
+        $name = trim((string) ($row['name'] ?? $row['label'] ?? $row['user_label'] ?? $row['description'] ?? $row['number'] ?? $row['port_number'] ?? ''));
         if ($name === '') {
             $name = trim((string) ($selectedPort['label'] ?? $connectedPort['label'] ?? $row['connected_port_label'] ?? $row['connected_port_name'] ?? ''));
         }
+        $connectedPortId = trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['port_connection_id'] ?? $connectedPort['id'] ?? ''));
+        $connectedItemId = trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['connection_item_id'] ?? $connectedItem['id'] ?? ''));
+        $connectedPortLabel = trim((string) ($row['connected_port_label'] ?? $row['connected_port_name'] ?? $row['connected_port_description'] ?? $row['connected_port_number'] ?? $connectedPort['label'] ?? ''));
+        if ($connectedPortLabel === '' && isset($row['connected_port']) && is_scalar($row['connected_port'])) {
+            $connectedPortLabel = trim((string) $row['connected_port']);
+        }
+        if ($connectedPortLabel !== '' && $connectedPortId !== '' && !str_contains($connectedPortLabel, '#' . $connectedPortId)) {
+            $connectedPortLabel = '#' . $connectedPortId . ' ' . $connectedPortLabel;
+        } elseif ($connectedPortLabel === '' && $connectedPortId !== '') {
+            $connectedPortLabel = '#' . $connectedPortId;
+        }
         if ($name === '' && $portId !== '') {
             $name = '#' . $portId;
-        } elseif ($name !== '' && $portId !== '' && !str_contains($name, '#' . $portId)) {
+        } elseif ($name !== '' && $portId !== '' && !str_contains($name, '#' . $portId) && !$this->isSimpleNumericLabel($name)) {
             $name = '#' . $portId . ' ' . $name;
         }
-        if ($name === '') {
-            $name = 'port';
-        }
-
-        $status = strtolower(trim((string) ($row['status'] ?? $row['state'] ?? $row['admin_state'] ?? $row['oper_state'] ?? $row['adminState'] ?? '')));
-        if ($status === '' && isset($selectedPort['state']) && is_string($selectedPort['state'])) {
-            $status = strtolower(trim((string) $selectedPort['state']));
-        }
-        $upRaw = $row['is_up'] ?? $row['up'] ?? $row['is_active'] ?? $row['enabled'] ?? null;
-        $isUp = false;
-        if (is_bool($upRaw)) {
-            $isUp = $upRaw;
-        } elseif (is_numeric($upRaw)) {
-            $isUp = (int) $upRaw === 1;
-        } elseif (is_string($upRaw) && trim($upRaw) !== '') {
-            $isUp = in_array(strtolower(trim($upRaw)), ['1', 'true', 'up', 'active', 'enabled', 'online', 'accepted'], true);
-        } else {
-            $isUp = in_array($status, ['up', 'active', 'enabled', 'online', 'accepted'], true);
+        if ($name === '' && $connectedPortLabel === '' && $portId === '' && $connectedPortId === '' && $connectedItemId === '') {
+            return null;
         }
 
         $trafficTotal = $this->extractTrafficTotal($row);
-        $connectedPortId = trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['port_connection_id'] ?? $connectedPort['id'] ?? ''));
-        $connectedItemId = trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['connection_item_id'] ?? $connectedItem['id'] ?? ''));
-        $connectedPortLabel = trim((string) ($row['connected_port_label'] ?? $row['connected_port_name'] ?? $connectedPort['label'] ?? ''));
+        $statusParts = [
+            is_string($row['status'] ?? null) ? strtolower(trim((string) ($row['status'] ?? ''))) : '',
+            is_string($row['state'] ?? null) ? strtolower(trim((string) ($row['state'] ?? ''))) : '',
+            strtolower(trim((string) ($row['admin_state'] ?? $row['adminState'] ?? ''))),
+            strtolower(trim((string) ($row['oper_state'] ?? $row['operState'] ?? ''))),
+            strtolower(trim((string) ($selectedPort['state'] ?? ''))),
+            strtolower(trim((string) ($connectedPort['state'] ?? ''))),
+            strtolower(trim((string) ($connectedItem['state'] ?? ''))),
+        ];
+        $status = trim(implode(' ', array_filter($statusParts, static fn (string $v): bool => $v !== '')));
+        $state = 'unknown';
+        if ($status !== '' && preg_match('/down|inactive|disabled|offline|not.?connected|disconnected|link.?down|error|fault/i', $status)) {
+            $state = 'down';
+        } elseif ($status !== '' && preg_match('/up|active|enabled|online|accepted|connected|link.?up|running/i', $status)) {
+            $state = 'up';
+        }
+
+        $upRaw = $row['is_up'] ?? $row['up'] ?? $row['link_up'] ?? null;
+        $isUp = false;
+        if (is_bool($upRaw)) {
+            $isUp = $upRaw;
+            $state = $isUp ? 'up' : 'down';
+        } elseif (is_numeric($upRaw)) {
+            $isUp = (int) $upRaw === 1;
+            $state = $isUp ? 'up' : 'down';
+        } elseif (is_string($upRaw) && trim($upRaw) !== '') {
+            $isUp = in_array(strtolower(trim($upRaw)), ['1', 'true', 'up', 'active', 'enabled', 'online', 'accepted', 'connected', 'running'], true);
+            $state = $isUp ? 'up' : 'down';
+        } elseif ($state === 'up') {
+            $isUp = true;
+        } elseif ($state === 'down') {
+            $isUp = false;
+        } elseif ($trafficTotal > 0.0) {
+            $isUp = true;
+            $state = 'up';
+        }
+        if ($isUp && $trafficTotal <= 0.0 && $state === 'up') {
+            $state = 'idle';
+        }
+
+        $speed = $this->normalizePortSpeedValue($row['speed'] ?? $row['speed_label'] ?? $row['speed_human'] ?? $row['bandwidth'] ?? $row['port_speed'] ?? $row['link_speed'] ?? null);
+        if ($speed === '') {
+            $speed = $this->normalizePortSpeedValue($selectedPort['speed'] ?? $connectedPort['speed'] ?? $connectedItem['speed'] ?? null);
+        }
+        if ($speed === '') {
+            $speed = $this->extractSpeedFromText(trim($name . ' ' . $connectedPortLabel . ' ' . (string) ($connectedItem['label'] ?? '')));
+        }
 
         return [
             'name' => $name,
             'description' => (string) ($row['description'] ?? ''),
             'type' => (string) ($row['type'] ?? $row['port_type'] ?? ''),
+            'state' => $state,
             'is_up' => $isUp,
             'traffic_total' => $trafficTotal,
+            'speed' => $speed,
             'port_id' => $portId,
             'connected_item_id' => $connectedItemId,
             'connected_port_id' => $connectedPortId,
@@ -3639,29 +3729,39 @@ final class AdminController
         $id = '';
         $label = '';
         $state = '';
+        $speed = '';
 
         if (is_array($value)) {
             $id = trim((string) ($value['id'] ?? $value['port_id'] ?? $value['item_id'] ?? $value['related_id'] ?? ''));
-            $label = trim((string) ($value['name'] ?? $value['label'] ?? $value['description'] ?? $value['title'] ?? ''));
+            $label = trim((string) ($value['name'] ?? $value['label'] ?? $value['user_label'] ?? $value['description'] ?? $value['number'] ?? $value['port'] ?? $value['title'] ?? ''));
             $state = trim((string) ($value['status'] ?? $value['state'] ?? $value['admin_state'] ?? $value['oper_state'] ?? ''));
+            $speed = $this->normalizePortSpeedValue($value['speed'] ?? $value['speed_label'] ?? $value['speed_human'] ?? $value['bandwidth'] ?? $value['port_speed'] ?? null);
             if ($id === '' && $label !== '' && preg_match('/#\\s*(\\d+)/', $label, $m)) {
                 $id = trim((string) $m[1]);
             }
-            return ['id' => $id, 'label' => $label, 'state' => $state];
+            if ($speed === '') {
+                $speed = $this->extractSpeedFromText($label);
+            }
+            return ['id' => $id, 'label' => $label, 'state' => $state, 'speed' => $speed];
         }
 
         if (!is_scalar($value)) {
-            return ['id' => '', 'label' => '', 'state' => ''];
+            return ['id' => '', 'label' => '', 'state' => '', 'speed' => ''];
         }
 
         $text = trim((string) $value);
         if ($text === '') {
-            return ['id' => '', 'label' => '', 'state' => ''];
+            return ['id' => '', 'label' => '', 'state' => '', 'speed' => ''];
         }
         if (preg_match('/#\\s*(\\d+)/', $text, $m)) {
             $id = trim((string) $m[1]);
+        } elseif (ctype_digit($text)) {
+            $id = $text;
         }
-        return ['id' => $id, 'label' => $text, 'state' => ''];
+        if ($id !== '' && $this->isSimpleNumericLabel($text)) {
+            $text = '#' . $id;
+        }
+        return ['id' => $id, 'label' => $text, 'state' => '', 'speed' => $this->extractSpeedFromText($text)];
     }
 
     private function extractTrafficTotal(array $row): float
@@ -4040,25 +4140,25 @@ final class AdminController
                 $rows = $connectedRows;
             }
             foreach ($rows as $r) {
-                $isUp = !empty($r['is_up']);
+                $stateHint = strtolower(trim((string) ($r['state'] ?? '')));
+                $isUp = !empty($r['is_up']) || in_array($stateHint, ['up', 'idle'], true);
                 $traffic = (float) ($r['traffic_total'] ?? 0.0);
-                $stateClass = 'edbw-dot-red';
-                $stateText = $this->isFa ? 'قطع' : 'Down';
-                if ($isUp && $traffic > 0.0) {
+                $stateClass = 'edbw-dot-yellow';
+                $stateText = $this->isFa ? 'نامشخص' : 'Unknown';
+                if ($stateHint === 'down') {
+                    $stateClass = 'edbw-dot-red';
+                    $stateText = $this->isFa ? 'قطع' : 'Down';
+                } elseif ($isUp && $traffic > 0.0) {
                     $stateClass = 'edbw-dot-green';
                     $stateText = $this->isFa ? 'فعال' : 'Up';
                 } elseif ($isUp) {
                     $stateClass = 'edbw-dot-yellow';
                     $stateText = $this->isFa ? 'بدون ترافیک' : 'Idle';
                 }
-                $name = trim((string) ($r['connected_port_label'] ?? ''));
-                if ($name === '') {
-                    $name = trim((string) ($r['name'] ?? ''));
-                }
-                if ($name === '') {
-                    $name = '#' . trim((string) ($r['port_id'] ?? '-'));
-                }
-                $lines[] = '<div class="edbw-port-line"><span class="edbw-dot ' . $stateClass . '"></span><span class="edbw-port-name">' . htmlspecialchars($name) . '</span><span class="edbw-port-state">(' . htmlspecialchars($stateText) . ')</span></div>';
+                $name = $this->resolvePortDisplayName($r);
+                $speed = trim((string) ($r['speed'] ?? ''));
+                $speedHtml = $speed !== '' ? '<span class="edbw-port-speed">' . htmlspecialchars($speed) . '</span>' : '';
+                $lines[] = '<div class="edbw-port-line"><span class="edbw-dot ' . $stateClass . '"></span><span class="edbw-port-name">' . htmlspecialchars($name) . '</span>' . $speedHtml . '<span class="edbw-port-state">(' . htmlspecialchars($stateText) . ')</span></div>';
             }
         }
 
@@ -4067,6 +4167,254 @@ final class AdminController
             $html .= '<div class="edbw-port-list">' . implode('', $lines) . '</div>';
         }
         return $html;
+    }
+
+    private function resolvePortDisplayName(array $row): string
+    {
+        $connected = trim((string) ($row['connected_port_label'] ?? ''));
+        $name = trim((string) ($row['name'] ?? ''));
+        $connectedId = trim((string) ($row['connected_port_id'] ?? ''));
+        $portId = trim((string) ($row['port_id'] ?? ''));
+
+        if ($connected !== '' && !$this->isSimpleNumericLabel($connected)) {
+            if ($name !== '' && !$this->isSimpleNumericLabel($name) && strcasecmp($name, $connected) !== 0) {
+                return $name . ' -> ' . $connected;
+            }
+            return $connected;
+        }
+        if ($name !== '' && !$this->isSimpleNumericLabel($name)) {
+            if ($connected !== '' && $connectedId !== '' && str_contains($connected, '#' . $connectedId)) {
+                return $name . ' -> ' . $connected;
+            }
+            return $name;
+        }
+        if ($connectedId !== '') {
+            return '#' . $connectedId;
+        }
+        if ($connected !== '') {
+            return $connected;
+        }
+        if ($name !== '') {
+            return $name;
+        }
+        if ($portId !== '') {
+            return '#' . $portId;
+        }
+        return '-';
+    }
+
+    private function isSimpleNumericLabel(string $value): bool
+    {
+        $v = trim($value);
+        if ($v === '') {
+            return false;
+        }
+        if (preg_match('/^#?\\d+$/', $v)) {
+            return true;
+        }
+        return false;
+    }
+
+    private function normalizePortSpeedValue($raw): string
+    {
+        if ($raw === null) {
+            return '';
+        }
+        if (is_numeric($raw)) {
+            $n = (float) $raw;
+            if ($n <= 0) {
+                return '';
+            }
+            if ($n >= 1000) {
+                $g = $n / 1000;
+                $text = abs($g - round($g)) < 0.01 ? (string) (int) round($g) : number_format($g, 1, '.', '');
+                return $text . 'G';
+            }
+            return number_format($n, 0, '.', '') . 'M';
+        }
+
+        $text = strtolower(trim((string) $raw));
+        if ($text === '') {
+            return '';
+        }
+        $text = str_replace(['gbps', 'gbit/s', 'gbit', 'mbps', 'mbit/s', 'mbit'], ['g', 'g', 'g', 'm', 'm', 'm'], $text);
+        if (preg_match('/(\\d+(?:\\.\\d+)?)\\s*g/', $text, $m)) {
+            $n = (float) $m[1];
+            $val = abs($n - round($n)) < 0.01 ? (string) (int) round($n) : number_format($n, 1, '.', '');
+            return $val . 'G';
+        }
+        if (preg_match('/(\\d+(?:\\.\\d+)?)\\s*m/', $text, $m)) {
+            $n = (float) $m[1];
+            if ($n >= 1000) {
+                $g = $n / 1000;
+                $val = abs($g - round($g)) < 0.01 ? (string) (int) round($g) : number_format($g, 1, '.', '');
+                return $val . 'G';
+            }
+            return number_format($n, 0, '.', '') . 'M';
+        }
+        if (preg_match('/\\b10g\\b/', $text)) {
+            return '10G';
+        }
+        if (preg_match('/\\b1g\\b/', $text)) {
+            return '1G';
+        }
+        if (preg_match('/\\b10000\\b/', $text)) {
+            return '10G';
+        }
+        if (preg_match('/\\b1000\\b/', $text)) {
+            return '1G';
+        }
+        return '';
+    }
+
+    private function extractSpeedFromText(string $text): string
+    {
+        return $this->normalizePortSpeedValue($text);
+    }
+
+    private function enrichPortRowsWithPortDetails(EasyDcimClient $client, array $rows): array
+    {
+        if (empty($rows)) {
+            return $rows;
+        }
+
+        foreach ($rows as $idx => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $detailId = trim((string) ($row['connected_port_id'] ?? ''));
+            if ($detailId === '') {
+                $detailId = trim((string) ($row['port_id'] ?? ''));
+            }
+            if ($detailId === '') {
+                continue;
+            }
+
+            $detail = $this->getPortDetailCached($client, $detailId);
+            if (empty($detail)) {
+                continue;
+            }
+
+            $currentConnected = trim((string) ($rows[$idx]['connected_port_label'] ?? ''));
+            $currentName = trim((string) ($rows[$idx]['name'] ?? ''));
+            $detailLabel = trim((string) ($detail['label'] ?? ''));
+            if ($detailLabel !== '') {
+                if ($currentConnected === '' || $this->isSimpleNumericLabel($currentConnected)) {
+                    $rows[$idx]['connected_port_label'] = $detailLabel;
+                }
+                if ($currentName === '' || $this->isSimpleNumericLabel($currentName)) {
+                    $rows[$idx]['name'] = $detailLabel;
+                }
+            }
+
+            $detailSpeed = trim((string) ($detail['speed'] ?? ''));
+            if ($detailSpeed !== '' && trim((string) ($rows[$idx]['speed'] ?? '')) === '') {
+                $rows[$idx]['speed'] = $detailSpeed;
+            }
+
+            $detailState = strtolower(trim((string) ($detail['state'] ?? '')));
+            $rowState = strtolower(trim((string) ($rows[$idx]['state'] ?? 'unknown')));
+            if ($detailState !== '' && ($rowState === '' || $rowState === 'unknown' || ($rowState === 'down' && in_array($detailState, ['up', 'idle'], true)))) {
+                $rows[$idx]['state'] = $detailState;
+            }
+
+            $detailUp = (bool) ($detail['is_up'] ?? false);
+            if (!empty($rows[$idx]['is_up'])) {
+                // Keep current positive state.
+            } elseif ($detailUp) {
+                $rows[$idx]['is_up'] = true;
+            }
+
+            $detailTraffic = (float) ($detail['traffic_total'] ?? 0.0);
+            if ($detailTraffic > 0.0 && (float) ($rows[$idx]['traffic_total'] ?? 0.0) <= 0.0) {
+                $rows[$idx]['traffic_total'] = $detailTraffic;
+            }
+        }
+
+        return $rows;
+    }
+
+    private function getPortDetailCached(EasyDcimClient $client, string $portId): array
+    {
+        $portId = trim($portId);
+        if ($portId === '') {
+            return [];
+        }
+        if (array_key_exists($portId, $this->portDetailsRuntimeCache)) {
+            $cached = $this->portDetailsRuntimeCache[$portId];
+            return is_array($cached) ? $cached : [];
+        }
+
+        try {
+            $response = $client->portDetails($portId);
+            $parsed = $this->parsePortDetailPayload($response, $portId);
+            $this->portDetailsRuntimeCache[$portId] = $parsed;
+            return $parsed;
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'port_details_fetch_failed', [
+                'port_id' => $portId,
+                'error' => $e->getMessage(),
+            ]);
+            $this->portDetailsRuntimeCache[$portId] = [];
+            return [];
+        }
+    }
+
+    private function parsePortDetailPayload(array $response, string $portId): array
+    {
+        $code = (int) ($response['http_code'] ?? 0);
+        if ($code < 200 || $code >= 300) {
+            return [];
+        }
+        $data = $this->extractApiDataPayload($response);
+        $rows = $this->extractPortItems($data);
+        $picked = null;
+        if (!empty($rows)) {
+            foreach ($rows as $row) {
+                $pid = trim((string) ($row['port_id'] ?? ''));
+                if ($pid !== '' && $pid === $portId) {
+                    $picked = $row;
+                    break;
+                }
+            }
+            if ($picked === null) {
+                $picked = $rows[0];
+            }
+        }
+
+        if (is_array($picked)) {
+            $label = trim($this->resolvePortDisplayName($picked));
+            if ($label === '-' || $label === '') {
+                $label = trim((string) ($picked['name'] ?? ''));
+            }
+            return [
+                'label' => $label,
+                'state' => strtolower(trim((string) ($picked['state'] ?? ''))),
+                'is_up' => !empty($picked['is_up']),
+                'speed' => trim((string) ($picked['speed'] ?? '')),
+                'traffic_total' => (float) ($picked['traffic_total'] ?? 0.0),
+            ];
+        }
+
+        $label = trim((string) ($data['name'] ?? $data['label'] ?? $data['user_label'] ?? $data['description'] ?? $data['number'] ?? ''));
+        if ($label === '') {
+            $label = '#' . $portId;
+        }
+        $stateRaw = strtolower(trim((string) ($data['status'] ?? $data['state'] ?? $data['admin_state'] ?? $data['oper_state'] ?? '')));
+        $state = 'unknown';
+        if ($stateRaw !== '' && preg_match('/down|inactive|disabled|offline|not.?connected|disconnected|link.?down|error|fault/i', $stateRaw)) {
+            $state = 'down';
+        } elseif ($stateRaw !== '' && preg_match('/up|active|enabled|online|accepted|connected|link.?up|running/i', $stateRaw)) {
+            $state = 'up';
+        }
+        $speed = $this->normalizePortSpeedValue($data['speed'] ?? $data['speed_label'] ?? $data['speed_human'] ?? $data['bandwidth'] ?? $data['port_speed'] ?? null);
+        return [
+            'label' => $label,
+            'state' => $state,
+            'is_up' => $state === 'up',
+            'speed' => $speed,
+            'traffic_total' => $this->extractTrafficTotal($data),
+        ];
     }
 
     private function isNetworkPortCandidate(string $name, string $description, string $type): bool
@@ -4118,6 +4466,7 @@ final class AdminController
             'tab_settings' => 'تنظیمات',
             'tab_scope' => 'سرویس/گروه',
             'tab_servers' => 'سرورها',
+            'tab_traffic' => 'ترافیک',
             'tab_packages' => 'پکیج‌ها',
             'tab_logs' => 'لاگ‌ها',
             'easy_connection' => 'اتصال EasyDCIM',
@@ -4217,6 +4566,12 @@ final class AdminController
             'ports_not_found' => 'پورتی پیدا نشد',
             'ports_error' => 'خطا در بررسی پورت',
             'server_ports_not_supported' => 'endpoint پورت با Server ID در EasyDCIM شما پشتیبانی نمی‌شود',
+            'traffic_report_title' => 'گزارش مصرف ترافیک سرویس‌ها',
+            'traffic_used_gb' => 'مصرف (GB)',
+            'traffic_remaining_gb' => 'باقی‌مانده (GB)',
+            'traffic_allowed_gb' => 'سقف موثر (GB)',
+            'traffic_cycle' => 'بازه سیکل',
+            'traffic_last_check' => 'آخرین بررسی',
             'status' => 'وضعیت',
             'no_rows' => 'موردی یافت نشد',
             'order_id' => 'Order ID',
@@ -4305,7 +4660,7 @@ final class AdminController
             'servers_cache_at' => 'آخرین به‌روزرسانی کش سرورها',
             'servers_refresh_cache' => 'کش و تکمیل شناسه‌ها',
             'servers_test_all' => 'تست همه',
-            'servers_test_all_continue' => 'ادامه تست (تکی)',
+            'servers_test_all_continue' => 'ادامه تست (بچ بعدی)',
             'servers_test_all_stop' => 'توقف تست',
             'servers_test_all_stopped' => 'تست گروهی متوقف شد',
             'servers_test_all_reset' => 'ریست صف تست',
@@ -4327,6 +4682,7 @@ final class AdminController
             'tab_settings' => 'Settings',
             'tab_scope' => 'Services / Group',
             'tab_servers' => 'Servers',
+            'tab_traffic' => 'Traffic',
             'tab_packages' => 'Packages',
             'tab_logs' => 'Logs',
             'easy_connection' => 'EasyDCIM Connection',
@@ -4426,6 +4782,12 @@ final class AdminController
             'ports_not_found' => 'No ports found',
             'ports_error' => 'Port lookup failed',
             'server_ports_not_supported' => 'Server-ID ports endpoint is not supported in your EasyDCIM',
+            'traffic_report_title' => 'Traffic Usage Report',
+            'traffic_used_gb' => 'Used (GB)',
+            'traffic_remaining_gb' => 'Remaining (GB)',
+            'traffic_allowed_gb' => 'Effective Allowed (GB)',
+            'traffic_cycle' => 'Cycle Window',
+            'traffic_last_check' => 'Last Check',
             'status' => 'Status',
             'no_rows' => 'No rows found',
             'order_id' => 'Order ID',
@@ -4514,7 +4876,7 @@ final class AdminController
             'servers_cache_at' => 'Servers cache last update',
             'servers_refresh_cache' => 'Refresh Cache + Complete IDs',
             'servers_test_all' => 'Test All',
-            'servers_test_all_continue' => 'Continue (1 by 1)',
+            'servers_test_all_continue' => 'Continue (next batch)',
             'servers_test_all_stop' => 'Stop',
             'servers_test_all_stopped' => 'Bulk test stopped',
             'servers_test_all_reset' => 'Reset Test Queue',

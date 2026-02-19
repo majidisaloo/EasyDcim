@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.36] - 2026-02-19
+### Fixed
+- Removed server/item port fallback from enforcement flow to stop mass invalid API calls (`/client/servers/*/ports`, `/client/items/*/ports`).
+- Test mode now avoids per-port discovery calls entirely and logs intended action as a single dry-run entry.
+### Changed
+- Port enable/disable in real mode is now strictly service-based (`/client/services/{id}/ports` discovery only).
+
 ## [1.35] - 2026-02-19
 ### Fixed
 - Stopped repeated invalid port lookups by server/item endpoints in servers workflow when `service_id` is missing.

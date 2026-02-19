@@ -23,20 +23,21 @@ final class EnforcementService
     public function enforce(string $action, string $serviceId, ?string $orderId, ?string $impersonateUser = null, ?string $serverId = null): void
     {
         if (in_array($action, ['disable_ports', 'both'], true)) {
+            if ($this->testMode) {
+                $this->logger->log('INFO', 'test_mode_action', [
+                    'action' => 'disable_ports',
+                    'service_id' => $serviceId,
+                    'order_id' => $orderId,
+                    'command' => 'POST /api/v3/admin/ports/{portId}/disable',
+                    'note' => 'Port discovery skipped in test mode to avoid high API load.',
+                ]);
+            } else {
             foreach ($this->resolvePorts($serviceId, $impersonateUser, $serverId) as $port) {
                 if (!empty($port['id'])) {
                     $portId = (string) $port['id'];
-                    if ($this->testMode) {
-                        $this->logger->log('INFO', 'test_mode_action', [
-                            'action' => 'disable_port',
-                            'service_id' => $serviceId,
-                            'port_id' => $portId,
-                            'command' => 'POST /api/v3/admin/ports/' . $portId . '/disable',
-                        ]);
-                    } else {
-                        $this->client->disablePort($portId);
-                    }
+                    $this->client->disablePort($portId);
                 }
+            }
             }
         }
 
@@ -64,20 +65,21 @@ final class EnforcementService
     public function unlock(string $action, string $serviceId, ?string $orderId, ?string $impersonateUser = null, ?string $serverId = null): void
     {
         if (in_array($action, ['disable_ports', 'both'], true)) {
+            if ($this->testMode) {
+                $this->logger->log('INFO', 'test_mode_action', [
+                    'action' => 'enable_ports',
+                    'service_id' => $serviceId,
+                    'order_id' => $orderId,
+                    'command' => 'POST /api/v3/admin/ports/{portId}/enable',
+                    'note' => 'Port discovery skipped in test mode to avoid high API load.',
+                ]);
+            } else {
             foreach ($this->resolvePorts($serviceId, $impersonateUser, $serverId) as $port) {
                 if (!empty($port['id'])) {
                     $portId = (string) $port['id'];
-                    if ($this->testMode) {
-                        $this->logger->log('INFO', 'test_mode_action', [
-                            'action' => 'enable_port',
-                            'service_id' => $serviceId,
-                            'port_id' => $portId,
-                            'command' => 'POST /api/v3/admin/ports/' . $portId . '/enable',
-                        ]);
-                    } else {
-                        $this->client->enablePort($portId);
-                    }
+                    $this->client->enablePort($portId);
                 }
+            }
             }
         }
 
@@ -106,16 +108,6 @@ final class EnforcementService
     {
         $ports = $this->client->ports($serviceId, false, $impersonateUser);
         $list = $ports['data']['data'] ?? $ports['data'] ?? [];
-        if (!empty($list)) {
-            return is_array($list) ? $list : [];
-        }
-
-        if (!$serverId) {
-            return [];
-        }
-
-        $fallback = $this->client->portsByServer($serverId, false, $impersonateUser);
-        $fallbackList = $fallback['data']['data'] ?? $fallback['data'] ?? [];
-        return is_array($fallbackList) ? $fallbackList : [];
+        return is_array($list) ? $list : [];
     }
 }

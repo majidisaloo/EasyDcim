@@ -577,7 +577,7 @@ final class AdminController
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_empty_hint')) . '</div>';
             }
             echo '<script>(function(){'
-                . 'var running=false;var timer=null;'
+                . 'var running=' . ($runningNow ? 'true' : 'false') . ';var timer=null;'
                 . 'var formTest=document.getElementById("edbw-test-all-form");'
                 . 'var formCont=document.getElementById("edbw-test-all-continue-form");'
                 . 'var formStop=document.getElementById("edbw-test-all-stop-form");'
@@ -608,14 +608,15 @@ final class AdminController
                 . '}'
                 . 'function tick(){if(!running){return;}'
                 . 'post("test").then(function(j){render(j);if(j && j.state && j.state.running && running){timer=setTimeout(tick,1000);}else{running=false;}}).catch(function(){running=false;if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});}'
-                . 'function bind(form,op,loop){if(!form){return;}form.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}'
-                . 'if(op==="stop"||op==="reset"){running=false;}'
-                . 'post(op).then(function(j){render(j);if(loop && j && j.state && j.state.running){running=true;tick();}}).catch(function(){if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});});}'
-                . 'bind(formTest,"test",true);'
-                . 'bind(formCont,"test",true);'
-                . 'bind(formStop,"stop",false);'
-                . 'bind(formReset,"reset",false);'
-                . 'bind(formRefresh,"refresh",false);'
+                . 'function bindContinue(){if(!formCont){return;}formCont.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}running=true;tick();});}'
+                . 'function bindReload(form){if(!form){return;}form.addEventListener("submit",function(){running=false;if(timer){clearTimeout(timer);timer=null;}});}'
+                . 'bindContinue();'
+                . 'bindReload(formTest);'
+                . 'bindReload(formStop);'
+                . 'bindReload(formReset);'
+                . 'bindReload(formRefresh);'
+                . 'setRunning(running);'
+                . 'if(running){timer=setTimeout(tick,1000);}'
                 . '})();</script>';
         }
         echo '</div>';

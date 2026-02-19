@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.65] - 2026-02-19
+### Fixed
+- Servers batch controls now follow mixed behavior for stability:
+  - `Test All`, `Stop`, `Reset`, `Refresh Cache` submit normally and reload once.
+  - ongoing batch execution continues via background AJAX without full-page refresh.
+- Fixed UX bug where batch could start but UI controls/progress would not immediately reflect state until manual reload.
+
 ## [1.64] - 2026-02-19
 ### Fixed
 - Reworked `Servers` batch-test AJAX to use a dedicated lightweight endpoint (`api=servers_batch`) so `Test All` no longer fails with generic `All services test failed`.

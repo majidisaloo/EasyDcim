@@ -19,6 +19,9 @@ final class AdminController
     private Logger $logger;
     private string $moduleDir;
     private bool $isFa;
+    private array $orderDetailsRuntimeCache = [];
+    private array $orderPortsRuntimeCache = [];
+    private array $orderServiceRuntimeCache = [];
 
     public function __construct(Settings $settings, Logger $logger, string $moduleDir)
     {
@@ -630,7 +633,7 @@ final class AdminController
                 . 'if(!fd.get("module")){fd.append("module","easydcim_bw");}'
                 . 'if(!fd.get("tab")){fd.append("tab","servers");}'
                 . 'return fetch(url,{method:"POST",body:fd,credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}}).then(function(r){return r.text();});}'
-                . 'function continueByForm(){if(formCont){formCont.submit();return;}if(formTest){formTest.submit();return;}window.location.reload();}'
+                . 'function pauseWithMessage(msg,isErr){running=false;setRunning(false);if(timer){clearTimeout(timer);timer=null;}if(status&&msg){status.textContent=msg;status.style.color=(isErr?"#b91c1c":"#b45309");}}'
                 . 'function call(op){'
                 . 'var actionMap={test:"test_all_services",stop:"stop_test_all_services",reset:"reset_test_all_services",refresh:"refresh_servers_cache"};'
                 . 'var action=(actionMap[op]||"test_all_services");'
@@ -659,9 +662,10 @@ final class AdminController
                 . 'call("test").then(function(j){render(j);'
                 . 'var expectedWork=(initTotal>initDone)||(j&&j.state&&((j.state.total||0)>(j.state.done||0)));'
                 . 'var invalidState=(!j||!j.state||(((j.state.total||0)===0)&&((j.state.done||0)===0)&&expectedWork));'
-                . 'if(noProgressTicks>=3||invalidState||(j&&j.type==="danger"&&expectedWork)){continueByForm();return;}'
-                . 'if(j && j.state && ((j.state.running)||((j.state.total||0)>(j.state.done||0))) && running){timer=setTimeout(tick,700);}else if(expectedWork){continueByForm();}else{running=false;}})'
-                . '.catch(function(){continueByForm();});}'
+                . 'if(noProgressTicks>=5){pauseWithMessage("' . addslashes($this->t('servers_test_all_progress')) . ' - ' . addslashes($this->t('servers_test_all_continue')) . '",false);return;}'
+                . 'if(invalidState||(j&&j.type==="danger"&&expectedWork)){pauseWithMessage((j&&j.message)?j.message:"' . addslashes($this->t('servers_test_all_failed')) . '",true);return;}'
+                . 'if(j && j.state && ((j.state.running)||((j.state.total||0)>(j.state.done||0))) && running){timer=setTimeout(tick,700);}else if(expectedWork){pauseWithMessage("' . addslashes($this->t('servers_test_all_progress')) . ' - ' . addslashes($this->t('servers_test_all_continue')) . '",false);}else{running=false;setRunning(false);}})'
+                . '.catch(function(){pauseWithMessage("' . addslashes($this->t('servers_test_all_failed')) . '",true);});}'
                 . 'function bindContinue(){if(!formCont){return;}formCont.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}running=true;tick();});}'
                 . 'function bindReload(form){if(!form){return;}form.addEventListener("submit",function(){running=false;if(timer){clearTimeout(timer);timer=null;}});}'
                 . 'bindContinue();'
@@ -1682,6 +1686,8 @@ final class AdminController
             $serverId = trim((string) ($target['easydcim_server_id'] ?? ''));
             $ip = trim((string) ($target['ip'] ?? ''));
             $portsEndpointMode = trim((string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'ports_endpoint_mode')->value('meta_value'));
+            $orderPortPrimary = ['ok' => false, 'reachable' => false, 'items' => []];
+            $orderPortLoaded = false;
             if (!$bulkMode && $orderId === '' && $serverId !== '') {
                 $orderId = $this->resolveOrderIdFromServer($client, $serverId, $ip);
             }
@@ -1703,13 +1709,14 @@ final class AdminController
                     $addCandidate($serviceCandidates, $itemService, 'ip_cache');
                 }
             }
-            if ($orderId !== '' && !$bulkMode) {
+            if ($orderId !== '' && !$bulkMode && empty($serviceCandidates)) {
                 $addCandidate($serviceCandidates, $this->resolveServiceIdFromOrder($client, $orderId, false), 'order_api');
             }
 
             // Prefer order-details when server/order mapping exists (more stable in restricted client endpoints).
             if ($orderId !== '' && $serverId !== '') {
                 $orderPortPrimary = $this->portsFromOrderDetails($client, $orderId);
+                $orderPortLoaded = true;
                 if (!empty($orderPortPrimary['ok'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => $orderPortPrimary['items']], 'error' => ''];
                     $mode = 'order_details_ports:server_order';
@@ -1717,13 +1724,30 @@ final class AdminController
             }
 
             if ($bulkMode && $mode === 'none' && $orderId !== '') {
-                $orderPortPrimary = $this->portsFromOrderDetails($client, $orderId);
+                if (!$orderPortLoaded) {
+                    $orderPortPrimary = $this->portsFromOrderDetails($client, $orderId);
+                    $orderPortLoaded = true;
+                }
                 if (!empty($orderPortPrimary['ok'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => $orderPortPrimary['items']], 'error' => ''];
                     $mode = 'order_details_ports:bulk';
                 } elseif ($portsEndpointMode === 'order_only' || !empty($orderPortPrimary['reachable'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
                     $mode = 'order_id_only:bulk';
+                }
+            }
+
+            if (!$bulkMode && $mode === 'none' && $orderId !== '' && $portsEndpointMode === 'order_only') {
+                if (!$orderPortLoaded) {
+                    $orderPortPrimary = $this->portsFromOrderDetails($client, $orderId);
+                    $orderPortLoaded = true;
+                }
+                if (!empty($orderPortPrimary['ok'])) {
+                    $response = ['http_code' => 200, 'data' => ['ports' => $orderPortPrimary['items']], 'error' => ''];
+                    $mode = 'order_details_ports:order_only';
+                } elseif (!empty($orderPortPrimary['reachable'])) {
+                    $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
+                    $mode = 'order_id_only';
                 }
             }
 
@@ -1777,7 +1801,11 @@ final class AdminController
             $orderIdForFallback = $orderId;
             $orderDetailsReachable = false;
             if (($code === 401 || $code === 403 || $code === 404 || $code === 422 || $code === 0) && $orderIdForFallback !== '') {
-                $orderPortFallback = $this->portsFromOrderDetails($client, $orderIdForFallback);
+                if (!$orderPortLoaded) {
+                    $orderPortPrimary = $this->portsFromOrderDetails($client, $orderIdForFallback);
+                    $orderPortLoaded = true;
+                }
+                $orderPortFallback = $orderPortPrimary;
                 $orderDetailsReachable = !empty($orderPortFallback['reachable']);
                 if (!empty($orderPortFallback['ok'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => $orderPortFallback['items']], 'error' => ''];
@@ -3345,8 +3373,17 @@ final class AdminController
 
     private function portsFromOrderDetails(EasyDcimClient $client, string $orderId): array
     {
+        $orderId = trim($orderId);
+        if ($orderId === '') {
+            return ['ok' => false, 'reachable' => false, 'items' => []];
+        }
+        if (isset($this->orderPortsRuntimeCache[$orderId]) && is_array($this->orderPortsRuntimeCache[$orderId])) {
+            return $this->orderPortsRuntimeCache[$orderId];
+        }
+
+        $result = ['ok' => false, 'reachable' => false, 'items' => []];
         try {
-            $details = $client->orderDetails($orderId);
+            $details = $this->getOrderDetailsCached($client, $orderId);
             $data = (array) ($details['data'] ?? []);
             $httpCode = (int) ($details['http_code'] ?? 0);
             $reachable = $httpCode >= 200 && $httpCode < 300;
@@ -3357,20 +3394,24 @@ final class AdminController
                     'count' => count($items),
                     'http_code' => $httpCode,
                 ]);
-                return ['ok' => true, 'reachable' => $reachable, 'items' => $items];
+                $result = ['ok' => true, 'reachable' => $reachable, 'items' => $items];
+                $this->orderPortsRuntimeCache[$orderId] = $result;
+                return $result;
             }
             $this->logger->log('INFO', 'resolved_ports_from_order_empty', [
                 'order_id' => $orderId,
                 'http_code' => $httpCode,
                 'top_keys' => array_slice(array_values(array_map(static fn ($k): string => (string) $k, array_keys($data))), 0, 25),
             ]);
+            $result = ['ok' => false, 'reachable' => $reachable, 'items' => []];
         } catch (\Throwable $e) {
             $this->logger->log('WARNING', 'resolve_ports_from_order_failed', [
                 'order_id' => $orderId,
                 'error' => $e->getMessage(),
             ]);
         }
-        return ['ok' => false, 'reachable' => false, 'items' => []];
+        $this->orderPortsRuntimeCache[$orderId] = $result;
+        return $result;
     }
 
     private function extractPortsRecursive($value, string $parentKey = ''): array
@@ -3423,16 +3464,21 @@ final class AdminController
         if ($orderId === '') {
             return '';
         }
+        if (array_key_exists($orderId, $this->orderServiceRuntimeCache)) {
+            return (string) $this->orderServiceRuntimeCache[$orderId];
+        }
         $cacheKey = 'order_service_map_' . $orderId;
         $cachedRaw = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', $cacheKey)->value('meta_value');
         if ($cachedRaw !== '') {
             $cached = json_decode($cachedRaw, true);
             if (is_array($cached) && isset($cached['checked_at'], $cached['service_id']) && strtotime((string) $cached['checked_at']) > time() - 1800) {
-                return trim((string) $cached['service_id']);
+                $cachedId = trim((string) $cached['service_id']);
+                $this->orderServiceRuntimeCache[$orderId] = $cachedId;
+                return $cachedId;
             }
         }
         try {
-            $details = $client->orderDetails($orderId);
+            $details = $this->getOrderDetailsCached($client, $orderId);
             $data = (array) ($details['data'] ?? []);
             $id = $this->findServiceIdRecursive($data);
             if ($id !== '') {
@@ -3443,9 +3489,10 @@ final class AdminController
                 $this->logger->log('INFO', 'resolved_service_id_from_order', [
                     'order_id' => $orderId,
                     'service_id' => $id,
-                    'via' => 'admin_order_details',
-                    'http_code' => (int) ($details['http_code'] ?? 0),
+                        'via' => 'admin_order_details',
+                        'http_code' => (int) ($details['http_code'] ?? 0),
                 ]);
+                $this->orderServiceRuntimeCache[$orderId] = $id;
                 return $id;
             }
         } catch (\Throwable $e) {
@@ -3461,6 +3508,7 @@ final class AdminController
                 ['meta_key' => $cacheKey],
                 ['meta_value' => json_encode(['service_id' => '', 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
             );
+            $this->orderServiceRuntimeCache[$orderId] = '';
             return '';
         }
 
@@ -3488,6 +3536,7 @@ final class AdminController
                         ['meta_key' => $cacheKey],
                         ['meta_value' => json_encode(['service_id' => $sid, 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
                     );
+                    $this->orderServiceRuntimeCache[$orderId] = $sid;
                     return $sid;
                 }
                 if (count($items) < 100) {
@@ -3506,7 +3555,22 @@ final class AdminController
             ['meta_key' => $cacheKey],
             ['meta_value' => json_encode(['service_id' => '', 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
         );
+        $this->orderServiceRuntimeCache[$orderId] = '';
         return '';
+    }
+
+    private function getOrderDetailsCached(EasyDcimClient $client, string $orderId): array
+    {
+        $orderId = trim($orderId);
+        if ($orderId === '') {
+            return ['http_code' => 0, 'data' => [], 'raw' => null, 'error' => 'missing_order_id'];
+        }
+        if (isset($this->orderDetailsRuntimeCache[$orderId]) && is_array($this->orderDetailsRuntimeCache[$orderId])) {
+            return $this->orderDetailsRuntimeCache[$orderId];
+        }
+        $details = $client->orderDetails($orderId);
+        $this->orderDetailsRuntimeCache[$orderId] = $details;
+        return $details;
     }
 
     private function resolveOrderIdFromServer(EasyDcimClient $client, string $serverId, string $ip = ''): string

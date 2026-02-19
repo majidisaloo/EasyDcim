@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.69] - 2026-02-19
+### Fixed
+- Hardened Servers batch AJAX against JS/response conflicts:
+  - primary call via standard action endpoint
+  - automatic fallback to `api=servers_batch` when primary response is non-JSON
+- Error status now shows a short raw response snippet for faster diagnosis when a proxy/theme/plugin injects HTML into AJAX responses.
+
 ## [1.68] - 2026-02-19
 ### Fixed
 - Added direct AJAX handlers for `action=test_all_services|stop|reset|refresh` with guaranteed JSON responses.

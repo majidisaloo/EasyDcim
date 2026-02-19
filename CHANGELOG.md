@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.53] - 2026-02-19
+### Fixed
+- `Test All` no longer runs all services in one long request; it now executes in queue mode with small batches (5 services per run) to prevent admin hang/timeouts.
+- Added queue controls for bulk testing:
+  - Continue batch test
+  - Reset test queue
+  - Live progress counters (done/total, ok/warn/fail)
+
 ## [1.52] - 2026-02-19
 ### Fixed
 - Clarified Servers table `PID` meaning by renaming it to `Product ID` (WHMCS product identifier, not port ID).

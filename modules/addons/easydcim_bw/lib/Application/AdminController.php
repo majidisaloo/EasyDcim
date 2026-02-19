@@ -132,6 +132,10 @@ final class AdminController
             $flash[] = $this->testAllServices();
             $tab = 'servers';
         }
+        if ($action === 'reset_test_all_services') {
+            $flash[] = $this->resetTestAllServices();
+            $tab = 'servers';
+        }
 
         // Keep admin load non-blocking: avoid automatic outbound checks on every page view.
         $this->settings = new Settings(Settings::loadFromDatabase());
@@ -492,6 +496,24 @@ final class AdminController
             echo '<input type="hidden" name="action" value="test_all_services">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all')) . '</button>';
             echo '</form>';
+            $testAllState = $this->getTestAllState();
+            if (($testAllState['remaining'] ?? 0) > 0) {
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<input type="hidden" name="tab" value="servers">';
+                echo '<input type="hidden" name="action" value="test_all_services">';
+                echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
+                echo '</form>';
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<input type="hidden" name="tab" value="servers">';
+                echo '<input type="hidden" name="action" value="reset_test_all_services">';
+                echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_reset')) . '</button>';
+                echo '</form>';
+                echo '<div class="alert alert-info">' . htmlspecialchars($this->t('servers_test_all_progress')) . ': '
+                    . (int) ($testAllState['done'] ?? 0) . '/' . (int) ($testAllState['total'] ?? 0)
+                    . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
+                    . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
+                    . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')</div>';
+            }
             echo '</div>';
             if (count($easyServices) === 0 && $cacheAt === '') {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
@@ -2381,32 +2403,57 @@ final class AdminController
     {
         try {
             if (function_exists('set_time_limit')) {
-                @set_time_limit(180);
+                @set_time_limit(60);
             }
-            $services = $this->getScopedHostingServices($this->getEasyServicesCacheOnly(), false, false);
-            if (empty($services)) {
+            $chunkSize = 5;
+            $state = $this->getTestAllState();
+            $queue = $state['queue'];
+
+            if (empty($queue)) {
+                $services = $this->getScopedHostingServices($this->getEasyServicesCacheOnly(), false, false);
+                if (empty($services)) {
+                    return ['type' => 'warning', 'text' => $this->t('no_rows')];
+                }
+                $queue = [];
+                foreach ($services as $svc) {
+                    $id = (int) ($svc['serviceid'] ?? 0);
+                    if ($id > 0) {
+                        $queue[] = $id;
+                    }
+                }
+                $queue = array_values(array_unique($queue));
+                $state = [
+                    'queue' => $queue,
+                    'total' => count($queue),
+                    'done' => 0,
+                    'ok' => 0,
+                    'warn' => 0,
+                    'fail' => 0,
+                    'remaining' => count($queue),
+                    'started_at' => date('Y-m-d H:i:s'),
+                ];
+            }
+
+            if (empty($queue)) {
+                $this->clearTestAllState();
                 return ['type' => 'warning', 'text' => $this->t('no_rows')];
             }
 
             $original = $_POST['test_serviceid'] ?? null;
-            $ok = 0;
-            $warn = 0;
-            $fail = 0;
-            foreach ($services as $svc) {
-                $id = (int) ($svc['serviceid'] ?? 0);
-                if ($id <= 0) {
-                    continue;
-                }
+            $batch = array_slice($queue, 0, $chunkSize);
+            $remaining = array_slice($queue, $chunkSize);
+            foreach ($batch as $id) {
                 $_POST['test_serviceid'] = (string) $id;
                 $result = $this->testServiceItem();
                 $type = (string) ($result['type'] ?? 'warning');
                 if ($type === 'success') {
-                    $ok++;
+                    $state['ok'] = (int) ($state['ok'] ?? 0) + 1;
                 } elseif ($type === 'danger') {
-                    $fail++;
+                    $state['fail'] = (int) ($state['fail'] ?? 0) + 1;
                 } else {
-                    $warn++;
+                    $state['warn'] = (int) ($state['warn'] ?? 0) + 1;
                 }
+                $state['done'] = (int) ($state['done'] ?? 0) + 1;
             }
             if ($original === null) {
                 unset($_POST['test_serviceid']);
@@ -2414,6 +2461,26 @@ final class AdminController
                 $_POST['test_serviceid'] = $original;
             }
 
+            $state['queue'] = $remaining;
+            $state['remaining'] = count($remaining);
+            $state['updated_at'] = date('Y-m-d H:i:s');
+            $this->saveTestAllState($state);
+
+            if (!empty($remaining)) {
+                return [
+                    'type' => 'info',
+                    'text' => $this->t('servers_test_all_progress') . ': '
+                        . (int) ($state['done'] ?? 0) . '/' . (int) ($state['total'] ?? 0)
+                        . ' (OK: ' . (int) ($state['ok'] ?? 0)
+                        . ', WARN: ' . (int) ($state['warn'] ?? 0)
+                        . ', FAIL: ' . (int) ($state['fail'] ?? 0) . ')',
+                ];
+            }
+
+            $ok = (int) ($state['ok'] ?? 0);
+            $warn = (int) ($state['warn'] ?? 0);
+            $fail = (int) ($state['fail'] ?? 0);
+            $this->clearTestAllState();
             return [
                 'type' => $fail > 0 ? 'warning' : 'success',
                 'text' => $this->t('servers_test_all_done') . ' | OK: ' . $ok . ' | WARN: ' . $warn . ' | FAIL: ' . $fail,
@@ -2422,6 +2489,42 @@ final class AdminController
             $this->logger->log('ERROR', 'servers_test_all_failed', ['error' => $e->getMessage()]);
             return ['type' => 'danger', 'text' => $this->t('servers_test_all_failed') . ': ' . $e->getMessage()];
         }
+    }
+
+    private function getTestAllState(): array
+    {
+        $raw = (string) Capsule::table('mod_easydcim_bw_guard_meta')
+            ->where('meta_key', 'servers_test_all_state')
+            ->value('meta_value');
+        if ($raw === '') {
+            return ['queue' => [], 'total' => 0, 'done' => 0, 'ok' => 0, 'warn' => 0, 'fail' => 0, 'remaining' => 0];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return ['queue' => [], 'total' => 0, 'done' => 0, 'ok' => 0, 'warn' => 0, 'fail' => 0, 'remaining' => 0];
+        }
+        $decoded['queue'] = isset($decoded['queue']) && is_array($decoded['queue']) ? $decoded['queue'] : [];
+        $decoded['remaining'] = isset($decoded['remaining']) ? (int) $decoded['remaining'] : count($decoded['queue']);
+        return $decoded;
+    }
+
+    private function saveTestAllState(array $state): void
+    {
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'servers_test_all_state'],
+            ['meta_value' => json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+    }
+
+    private function clearTestAllState(): void
+    {
+        Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_test_all_state')->delete();
+    }
+
+    private function resetTestAllServices(): array
+    {
+        $this->clearTestAllState();
+        return ['type' => 'success', 'text' => $this->t('servers_test_all_reset_done')];
     }
 
     private function getScopedClientEmails(int $limit = 40): array
@@ -3143,6 +3246,10 @@ final class AdminController
             'servers_cache_at' => 'آخرین به‌روزرسانی کش سرورها',
             'servers_refresh_cache' => 'کش و تکمیل شناسه‌ها',
             'servers_test_all' => 'تست همه',
+            'servers_test_all_continue' => 'ادامه تست (۵تایی)',
+            'servers_test_all_reset' => 'ریست صف تست',
+            'servers_test_all_reset_done' => 'صف تست همه سرویس‌ها ریست شد',
+            'servers_test_all_progress' => 'پیشرفت تست گروهی',
             'servers_sync_now' => 'همگام‌سازی سرورها (دستی)',
             'servers_cache_empty_hint' => 'کش سرورها خالی است. برای جلوگیری از کندی، لیست با همگام‌سازی دستی یا کرون پر می‌شود.',
             'servers_cache_refreshed' => 'کش سرورها به‌روزرسانی شد',
@@ -3338,6 +3445,10 @@ final class AdminController
             'servers_cache_at' => 'Servers cache last update',
             'servers_refresh_cache' => 'Refresh Cache + Complete IDs',
             'servers_test_all' => 'Test All',
+            'servers_test_all_continue' => 'Continue (Batch of 5)',
+            'servers_test_all_reset' => 'Reset Test Queue',
+            'servers_test_all_reset_done' => 'Test-all queue has been reset',
+            'servers_test_all_progress' => 'Batch test progress',
             'servers_sync_now' => 'Sync servers now',
             'servers_cache_empty_hint' => 'Servers cache is empty. To avoid page slowness, list is loaded by manual sync or cron.',
             'servers_cache_refreshed' => 'Servers cache refreshed',

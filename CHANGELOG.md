@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.88] - 2026-02-19
+### Fixed
+- Bulk test flow no longer short-circuits permanently on `order_id_only:bulk`; it now continues with service/server fallback probes in the same run.
+- Added no-impersonation fallback for server-based port lookup when server endpoints return `401/403/422`.
+- AJAX batch call now prioritizes dedicated `api=servers_batch` endpoint first for more stable JSON responses.
+
 ## [1.87] - 2026-02-19
 ### Fixed
 - Added hard fallback submit path for `Test All` when AJAX response is invalid/blocked, so bulk test never stays idle.

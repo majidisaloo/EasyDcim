@@ -638,9 +638,9 @@ final class AdminController
                 . 'function call(op){'
                 . 'var actionMap={test:"test_all_services",stop:"stop_test_all_services",reset:"reset_test_all_services",refresh:"refresh_servers_cache"};'
                 . 'var action=(actionMap[op]||"test_all_services");'
-                . 'return postAjax(baseUrl,{ajax:"1",tab:"servers",action:action,_:String(Date.now())})'
-                . '.then(function(txt){var p=parsePayload(txt);if(p){return p;}'
                 . 'return postAjax(apiUrlFallback,{ajax:"1",tab:"servers",op:op,_:String(Date.now())})'
+                . '.then(function(txt){var p=parsePayload(txt);if(p){return p;}'
+                . 'return postAjax(baseUrl,{ajax:"1",tab:"servers",action:action,_:String(Date.now())})'
                 . '.then(function(txt2){var p2=parsePayload(txt2);return p2||errPayload(txt2||txt);})'
                 . '.catch(function(){return errPayload(txt);});'
                 . '});}'
@@ -1690,6 +1690,7 @@ final class AdminController
             $portsEndpointMode = trim((string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'ports_endpoint_mode')->value('meta_value'));
             $orderPortPrimary = ['ok' => false, 'reachable' => false, 'items' => []];
             $orderPortLoaded = false;
+            $orderOnlyFallback = false;
             if (!$bulkMode && $orderId === '' && $serverId !== '') {
                 $orderId = $this->resolveOrderIdFromServer($client, $serverId, $ip);
             }
@@ -1736,6 +1737,7 @@ final class AdminController
                 } elseif ($portsEndpointMode === 'order_only' || !empty($orderPortPrimary['reachable'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
                     $mode = 'order_id_only:bulk';
+                    $orderOnlyFallback = true;
                 }
             }
 
@@ -1750,12 +1752,21 @@ final class AdminController
                 } elseif (!empty($orderPortPrimary['reachable'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
                     $mode = 'order_id_only';
+                    $orderOnlyFallback = true;
                 }
             }
 
-            if (!($bulkMode && $mode !== 'none' && str_starts_with($mode, 'order_'))) {
+            if ($mode === 'none' || $orderOnlyFallback) {
                 foreach ($serviceCandidates as $candidate) {
                     if ($mode !== 'none') {
+                        if (!$orderOnlyFallback) {
+                            break;
+                        }
+                        if (!str_starts_with((string) $mode, 'order_id_only')) {
+                            break;
+                        }
+                    }
+                    if ($mode !== 'none' && str_starts_with((string) $mode, 'order_details_ports')) {
                         break;
                     }
                     $candidateId = (string) ($candidate['id'] ?? '');
@@ -1774,6 +1785,7 @@ final class AdminController
                         if ($fallbackCode >= 200 && $fallbackCode < 300) {
                             $response = $fallbackResp;
                             $mode = 'service_id:' . $candidateSource . ':no_impersonation';
+                            $orderOnlyFallback = false;
                             break;
                         }
                         if ($fallbackCode !== 0) {
@@ -1787,12 +1799,22 @@ final class AdminController
                 }
             }
 
-            if (!$bulkMode && $mode === 'none' && $serverId !== '') {
+            if (($mode === 'none' || $orderOnlyFallback) && $serverId !== '') {
                 $serverResp = $client->portsByServer($serverId, true, $email);
                 $serverCode = (int) ($serverResp['http_code'] ?? 0);
+                if (($serverCode === 401 || $serverCode === 403 || $serverCode === 422) && $useImpersonation) {
+                    $fallbackClient = new EasyDcimClient($baseUrl, $token, false, $this->logger, $this->proxyConfig());
+                    $fallbackServerResp = $fallbackClient->portsByServer($serverId, true, null);
+                    $fallbackServerCode = (int) ($fallbackServerResp['http_code'] ?? 0);
+                    if ($fallbackServerCode >= 200 && $fallbackServerCode < 300) {
+                        $serverResp = $fallbackServerResp;
+                        $serverCode = $fallbackServerCode;
+                    }
+                }
                 if ($serverCode >= 200 && $serverCode < 300) {
                     $response = $serverResp;
-                    $mode = 'server_id';
+                    $mode = $bulkMode ? 'server_id:bulk' : 'server_id';
+                    $orderOnlyFallback = false;
                 } elseif ((int) ($response['http_code'] ?? 0) === 0) {
                     $response = $serverResp;
                     $mode = 'server_id_only';

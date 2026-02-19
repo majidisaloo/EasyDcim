@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.82] - 2026-02-19
+### Fixed
+- Hardened Servers batch JS runner against zero/invalid AJAX state while queue still has work.
+- If AJAX payload is inconsistent (or danger) but pending progress is expected, runner now auto-submits `Continue` form instead of stopping.
+- Prevents UI regression where `Stop/Reset` disappears and queue remains stuck at low progress.
+
 ## [1.81] - 2026-02-19
 ### Fixed
 - Added robust batch-test auto-recovery in Servers tab:

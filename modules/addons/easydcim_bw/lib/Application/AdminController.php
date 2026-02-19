@@ -89,7 +89,7 @@ final class AdminController
         }
         if ($action === 'run_preflight') {
             $flash[] = ['type' => 'info', 'text' => $this->t('preflight_retested')];
-            $tab = 'dashboard';
+            $tab = (string) ($_POST['tab'] ?? 'health');
         }
         if ($action === 'check_release_update') {
             $flash[] = $this->checkReleaseUpdate();
@@ -151,6 +151,8 @@ final class AdminController
             $this->renderConnectionTab();
         } elseif ($tab === 'scope') {
             $this->renderScopeTab();
+        } elseif ($tab === 'health') {
+            $this->renderHealthTab();
         } elseif ($tab === 'servers') {
             $this->renderServersTab();
         } elseif ($tab === 'packages') {
@@ -168,6 +170,7 @@ final class AdminController
     {
         $tabs = [
             'dashboard' => $this->t('tab_dashboard'),
+            'health' => $this->t('tab_health'),
             'connection' => $this->t('tab_connection'),
             'settings' => $this->t('tab_settings'),
             'scope' => $this->t('tab_scope'),
@@ -196,11 +199,6 @@ final class AdminController
         if ($releaseTag !== '' && $this->compareVersion($releaseVersion, (string) $version['module_version']) <= 0) {
             $releaseAvailable = false;
         }
-        $checks = $this->buildHealthChecks();
-        $checkMap = [];
-        foreach ($checks as $row) {
-            $checkMap[$row['name']] = $row['ok'];
-        }
         $connectionState = $this->getConnectionRuntimeState();
 
         echo '<div class="edbw-metrics">';
@@ -224,6 +222,20 @@ final class AdminController
         echo '<div class="edbw-actions edbw-actions-col">';
         echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="check_release_update"><button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('check_update_now')) . '</button></form>';
         echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="apply_release_update"><button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('apply_latest_release')) . '</button></form>';
+        echo '</div>';
+        echo '</div>';
+
+    }
+
+    private function renderHealthTab(): void
+    {
+        $runtimeCards = $this->buildRuntimeStatus();
+        echo '<div class="edbw-panel">';
+        echo '<h3>' . htmlspecialchars($this->t('health_runtime_title')) . '</h3>';
+        echo '<div class="edbw-metrics">';
+        foreach ($runtimeCards as $card) {
+            $this->renderMetricCard($card['label'], $card['value'], $card['state'], $card['icon']);
+        }
         echo '</div>';
         echo '</div>';
 
@@ -727,7 +739,7 @@ final class AdminController
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('preflight_checks')) . '</h3>';
         echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="tab" value="dashboard">';
+        echo '<input type="hidden" name="tab" value="health">';
         echo '<input type="hidden" name="action" value="run_preflight">';
         echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('retest')) . '</button>';
         echo '</form>';
@@ -2216,6 +2228,7 @@ final class AdminController
         $fa = [
             'subtitle' => 'مرکز کنترل ترافیک سرویس‌های EasyDCIM',
             'tab_dashboard' => 'داشبورد',
+            'tab_health' => 'هلث چک',
             'tab_connection' => 'Easy DCIM',
             'tab_settings' => 'تنظیمات',
             'tab_scope' => 'سرویس/گروه',
@@ -2390,10 +2403,12 @@ final class AdminController
             'rt_test_mode' => 'حالت تست',
             'rt_test_mode_on' => 'فعال (Dry Run)',
             'rt_test_mode_off' => 'غیرفعال',
+            'health_runtime_title' => 'وضعیت اجرا و کرون',
         ];
         $en = [
             'subtitle' => 'Bandwidth control center for EasyDCIM services',
             'tab_dashboard' => 'Dashboard',
+            'tab_health' => 'Health Check',
             'tab_connection' => 'Easy DCIM',
             'tab_settings' => 'Settings',
             'tab_scope' => 'Services / Group',
@@ -2568,6 +2583,7 @@ final class AdminController
             'rt_test_mode' => 'Test Mode',
             'rt_test_mode_on' => 'Enabled (Dry Run)',
             'rt_test_mode_off' => 'Disabled',
+            'health_runtime_title' => 'Runtime and Cron Status',
         ];
         $map = $this->isFa ? $fa : $en;
         return $map[$key] ?? $key;

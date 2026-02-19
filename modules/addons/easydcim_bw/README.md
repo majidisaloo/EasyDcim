@@ -2,7 +2,7 @@
 
 Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git updates, and complete traffic purchase audit logs.
 
-Current version: `1.39`
+Current version: `1.40`
 
 ## Key Features
 
@@ -11,12 +11,12 @@ Current version: `1.39`
 - Port enforcement resolves port IDs by service, with fallback by `easydcim_server_id`.
 - Short version from `modules/addons/easydcim_bw/VERSION` (e.g. `1.16`) with git metadata when available.
 - Auto update check from GitHub releases + one-click admin update without `shell_exec`.
-- Update apply is now queued and executed by WHMCS cron to avoid admin-page timeouts during download/extract.
+- Update apply runs immediately from admin action (no shell commands required).
 - Admin dashboard rendering is cache-first and does not run outbound API/release checks automatically.
 - Strict additive/idempotent migrations only on `mod_easydcim_bw_guard_*` tables.
 - Deactivate keeps all module data/settings by default; optional `Purge Data On Deactivate` removes only module tables/settings.
 - Purchase logs include invoice, cycle window, reset date, actor, and timestamp.
-- Admin UI is tab-based (`Dashboard`, `Easy DCIM`, `Settings`, `Services / Group`, `Servers`, `Packages`, `Logs`) with color-coded status cards.
+- Admin UI is tab-based (`Dashboard`, `Health Check`, `Easy DCIM`, `Settings`, `Services / Group`, `Servers`, `Packages`, `Logs`) with color-coded status cards.
 - Test mode (dry run) logs intended enforcement commands without sending real suspend/port actions.
 - Configurable log retention with automatic cleanup in cron and manual cleanup in Logs tab.
 - Added `Scope` tab for managed `PID/GID` and per-plan quota rules (`IN/OUT/TOTAL` + unlimited toggles).
@@ -51,4 +51,4 @@ Default mode is `check_oneclick`:
 
 - Cron/check action checks latest GitHub release.
 - Admin sees availability in dashboard.
-- Admin apply action queues update request instantly; cron downloads/extracts the release in background.
+- Admin apply action downloads/extracts the latest release immediately.

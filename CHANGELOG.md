@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.40] - 2026-02-19
+### Changed
+- Added a dedicated `Health Check` tab and moved heavy preflight/custom-field coverage checks there.
+- Moved Important Warnings panel from Dashboard to `Health Check` to keep Dashboard fast on large WHMCS datasets.
+- Health tab now includes runtime/cron status cards, preflight retest, and warning table in one place.
+### Performance
+- Dashboard no longer runs scope-wide custom-field counting on each load.
+
 ## [1.39] - 2026-02-19
 ### Fixed
 - Preflight custom-field checks are now scope-aware with counts per field (`configured/total`) and warning state for partial coverage.

@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.71] - 2026-02-19
+### Fixed
+- Fixed batch `Test All` transport to avoid HTML responses in AJAX loop:
+  - switched background batch calls to `POST` with `FormData` on current admin URL
+  - fallback batch endpoint also uses `POST` JSON-accept requests
+- This resolves repeated `All services test failed - invalid server response [<!DOCTYPE html ...]` caused by admin query/session routing edge cases.
+
 ## [1.70] - 2026-02-19
 ### Fixed
 - Fixed `All services test failed - invalid server response` in Servers batch test:

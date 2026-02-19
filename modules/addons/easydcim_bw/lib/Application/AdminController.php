@@ -464,33 +464,7 @@ final class AdminController
         $easyServices = $this->getEasyServicesCacheOnly();
         $services = $this->getScopedHostingServices($easyServices, false, false);
 
-        $mappedServiceIds = [];
-        foreach ($services as $svc) {
-            $sid = trim((string) ($svc['easydcim_service_id'] ?? ''));
-            if ($sid !== '') {
-                $mappedServiceIds[$sid] = true;
-            }
-        }
-        $unassigned = array_values(array_filter($easyServices, static function (array $item) use ($mappedServiceIds): bool {
-            $serviceId = trim((string) ($item['service_id'] ?? ''));
-            $serverId = trim((string) ($item['server_id'] ?? ''));
-            $ip = trim((string) ($item['ip'] ?? ''));
-            $orderId = trim((string) ($item['order_id'] ?? ''));
-            $status = strtolower(trim((string) ($item['status'] ?? '')));
-            if ($serviceId === '' && $serverId === '' && $ip === '' && $orderId === '') {
-                return false;
-            }
-            if ($serviceId !== '' && isset($mappedServiceIds[$serviceId])) {
-                return false;
-            }
-            if ($serverId === '' && $ip === '') {
-                return false;
-            }
-            if (in_array($status, ['pending', 'rejected', 'cancelled', 'canceled', 'fraud'], true)) {
-                return false;
-            }
-            return true;
-        }));
+        $unassigned = $this->buildUnassignedEasyServices($easyServices, $services);
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_tab_title')) . '</h3>';
@@ -579,18 +553,20 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_unassigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>iLO IP</th><th>Label</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
         foreach ($unassigned as $item) {
             echo '<tr>';
             echo '<td>' . htmlspecialchars((string) ($item['service_id'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['server_id'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['ip'] ?? '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($item['ilo_ip'] ?? '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($item['label'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['order_id'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['status'] ?? '-')) . '</td>';
             echo '</tr>';
         }
         if (empty($unassigned)) {
-            echo '<tr><td colspan="5">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+            echo '<tr><td colspan="7">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
         echo '</div>';
@@ -604,6 +580,40 @@ final class AdminController
         }
         $decoded = json_decode($cacheJson, true);
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function buildUnassignedEasyServices(array $easyServices, array $services): array
+    {
+        $mappedServiceIds = [];
+        foreach ($services as $svc) {
+            $sid = trim((string) ($svc['easydcim_service_id'] ?? ''));
+            if ($sid !== '') {
+                $mappedServiceIds[$sid] = true;
+            }
+        }
+
+        return array_values(array_filter($easyServices, static function (array $item) use ($mappedServiceIds): bool {
+            $serviceId = trim((string) ($item['service_id'] ?? ''));
+            $serverId = trim((string) ($item['server_id'] ?? ''));
+            $ip = trim((string) ($item['ip'] ?? ''));
+            $iloIp = trim((string) ($item['ilo_ip'] ?? ''));
+            $label = trim((string) ($item['label'] ?? ''));
+            $orderId = trim((string) ($item['order_id'] ?? ''));
+            $status = strtolower(trim((string) ($item['status'] ?? '')));
+            if ($serviceId === '' && $serverId === '' && $ip === '' && $orderId === '' && $iloIp === '' && $label === '') {
+                return false;
+            }
+            if ($serviceId !== '' && isset($mappedServiceIds[$serviceId])) {
+                return false;
+            }
+            if ($serverId === '' && $ip === '' && $iloIp === '' && $label === '') {
+                return false;
+            }
+            if (in_array($status, ['pending', 'rejected', 'cancelled', 'canceled', 'fraud'], true)) {
+                return false;
+            }
+            return true;
+        }));
     }
 
     private function fetchEasyServices(): array
@@ -730,6 +740,8 @@ final class AdminController
                         continue;
                     }
                     $identity = $this->extractEasyClientIdentity($row);
+                    $label = $this->extractPreferredLabel($row);
+                    $iloIp = $this->extractManagementIp($row);
                     $serviceId = trim((string) ($row['service_id'] ?? $row['serviceId'] ?? ''));
                     if ($serviceId === '' && isset($row['service']) && is_array($row['service'])) {
                         $serviceId = trim((string) ($row['service']['id'] ?? $row['service']['service_id'] ?? ''));
@@ -747,6 +759,8 @@ final class AdminController
                         'server_id' => $serverId,
                         'order_id' => trim((string) ($row['id'] ?? $row['order_id'] ?? $row['orderId'] ?? '')),
                         'ip' => $ip,
+                        'ilo_ip' => $iloIp,
+                        'label' => $label,
                         'status' => (string) ($row['status'] ?? ''),
                         'client_name' => $identity['name'],
                         'client_email' => $identity['email'],
@@ -884,7 +898,8 @@ final class AdminController
 
     private function buildImportantWarnings(): array
     {
-        $rows = $this->getScopedHostingServices([], false);
+        $easyServices = $this->getEasyServicesCacheOnly();
+        $rows = $this->getScopedHostingServices($easyServices, false);
         if (empty($rows)) {
             return [];
         }
@@ -978,6 +993,76 @@ final class AdminController
                 'type' => $this->t('warn_client_mismatch'),
                 'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink . ' | ' . implode(' | ', $parts),
             ];
+        }
+
+        $unassigned = $this->buildUnassignedEasyServices($easyServices, $rows);
+        if (!empty($unassigned)) {
+            $byIp = [];
+            $byLabel = [];
+            foreach ($activeRows as $r) {
+                $ip = $this->normalizeLooseIdentifier((string) ($r['ip'] ?? ''));
+                $domain = $this->normalizeLooseIdentifier((string) ($r['domain'] ?? ''));
+                if ($ip !== '') {
+                    $byIp[$ip][] = $r;
+                }
+                if ($domain !== '') {
+                    $byLabel[$domain][] = $r;
+                }
+            }
+
+            foreach ($unassigned as $item) {
+                $matches = [];
+                $iloIp = $this->normalizeLooseIdentifier((string) ($item['ilo_ip'] ?? ''));
+                $serviceIp = $this->normalizeLooseIdentifier((string) ($item['ip'] ?? ''));
+                $label = $this->normalizeLooseIdentifier((string) ($item['label'] ?? ''));
+
+                if ($iloIp !== '' && isset($byIp[$iloIp])) {
+                    foreach ($byIp[$iloIp] as $m) {
+                        $matches[(int) $m['serviceid']] = $m;
+                    }
+                }
+                if ($serviceIp !== '' && isset($byIp[$serviceIp])) {
+                    foreach ($byIp[$serviceIp] as $m) {
+                        $matches[(int) $m['serviceid']] = $m;
+                    }
+                }
+                if ($label !== '' && isset($byLabel[$label])) {
+                    foreach ($byLabel[$label] as $m) {
+                        $matches[(int) $m['serviceid']] = $m;
+                    }
+                }
+                if (empty($matches)) {
+                    continue;
+                }
+
+                $serviceLinks = [];
+                foreach ($matches as $m) {
+                    $serviceLinks[] = '<a href="' . htmlspecialchars((string) ($m['service_url'] ?? '#')) . '">#' . (int) $m['serviceid'] . '</a>';
+                }
+                $parts = [];
+                if (trim((string) ($item['service_id'] ?? '')) !== '') {
+                    $parts[] = 'EasyDCIM Service=' . htmlspecialchars((string) $item['service_id']);
+                }
+                if (trim((string) ($item['server_id'] ?? '')) !== '') {
+                    $parts[] = 'Server=' . htmlspecialchars((string) $item['server_id']);
+                }
+                if (trim((string) ($item['order_id'] ?? '')) !== '') {
+                    $parts[] = 'Order=' . htmlspecialchars((string) $item['order_id']);
+                }
+                if (trim((string) ($item['ilo_ip'] ?? '')) !== '') {
+                    $parts[] = 'iLO=' . htmlspecialchars((string) $item['ilo_ip']);
+                }
+                if (trim((string) ($item['label'] ?? '')) !== '') {
+                    $parts[] = 'Label=' . htmlspecialchars((string) $item['label']);
+                }
+                if (trim((string) ($item['ip'] ?? '')) !== '') {
+                    $parts[] = 'IP=' . htmlspecialchars((string) $item['ip']);
+                }
+                $warnings[] = [
+                    'type' => $this->t('warn_unassigned_possible_match'),
+                    'text' => implode(' | ', $parts) . ' | ' . htmlspecialchars($this->t('warn_unassigned_possible_match_target')) . ': ' . implode(' , ', $serviceLinks),
+                ];
+            }
         }
 
         return $warnings;
@@ -2104,6 +2189,7 @@ final class AdminController
             ->leftJoin('mod_easydcim_bw_guard_service_state as s', 's.serviceid', '=', 'h.id')
             ->select([
                 'h.id as serviceid', 'h.userid', 'h.packageid as pid', 'h.domainstatus', 'h.dedicatedip',
+                'h.domain',
                 'c.firstname', 'c.lastname', 'c.email',
                 's.easydcim_service_id as state_service_id',
             ]);
@@ -2364,6 +2450,13 @@ final class AdminController
     {
         $v = strtolower(trim($value));
         $v = preg_replace('/\s+/', ' ', $v) ?? $v;
+        return $v;
+    }
+
+    private function normalizeLooseIdentifier(string $value): string
+    {
+        $v = strtolower(trim($value));
+        $v = preg_replace('/\s+/', '', $v) ?? $v;
         return $v;
     }
 
@@ -2684,6 +2777,8 @@ final class AdminController
             $identity = $this->extractEasyClientIdentity($row);
             $related = isset($row['related']) && is_array($row['related']) ? $row['related'] : [];
             $relatedId = (string) ($row['related_id'] ?? $row['server_id'] ?? $row['device_id'] ?? $row['item_id'] ?? '');
+            $label = $this->extractPreferredLabel($row);
+            $iloIp = $this->extractManagementIp($row);
             $ip = (string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? '');
             if ($ip === '' && isset($related['ip_addresses']) && is_array($related['ip_addresses'])) {
                 foreach ($related['ip_addresses'] as $ipRow) {
@@ -2717,6 +2812,8 @@ final class AdminController
                 'server_id' => $relatedId,
                 'order_id' => (string) ($row['order_id'] ?? $row['orderId'] ?? (($row['order']['id'] ?? $row['order']['order_id'] ?? ''))),
                 'ip' => $ip,
+                'ilo_ip' => $iloIp,
+                'label' => $label,
                 'status' => (string) ($row['status'] ?? $row['state'] ?? ''),
                 'client_name' => $identity['name'],
                 'client_email' => $identity['email'],
@@ -2808,6 +2905,60 @@ final class AdminController
         }
 
         return ['name' => $name, 'email' => $email];
+    }
+
+    private function extractPreferredLabel(array $row): string
+    {
+        foreach (['label', 'name', 'hostname', 'title', 'server_label', 'service_label'] as $k) {
+            $v = trim((string) ($row[$k] ?? ''));
+            if ($v !== '') {
+                return $v;
+            }
+        }
+        foreach (['related', 'service', 'order', 'item', 'server'] as $node) {
+            if (!isset($row[$node]) || !is_array($row[$node])) {
+                continue;
+            }
+            foreach (['label', 'name', 'hostname', 'title'] as $k) {
+                $v = trim((string) ($row[$node][$k] ?? ''));
+                if ($v !== '') {
+                    return $v;
+                }
+            }
+        }
+        return '';
+    }
+
+    private function extractManagementIp(array $row): string
+    {
+        $keys = ['ilo_ip', 'ipmi_ip', 'idrac_ip', 'bmc_ip', 'management_ip', 'mgmt_ip', 'out_of_band_ip'];
+        foreach ($keys as $k) {
+            $v = trim((string) ($row[$k] ?? ''));
+            if ($v !== '') {
+                return $v;
+            }
+        }
+        foreach (['related', 'service', 'order', 'item', 'server', 'management', 'oob'] as $node) {
+            if (!isset($row[$node]) || !is_array($row[$node])) {
+                continue;
+            }
+            foreach ($keys as $k) {
+                $v = trim((string) ($row[$node][$k] ?? ''));
+                if ($v !== '') {
+                    return $v;
+                }
+            }
+            foreach (['ip', 'ipv4'] as $k) {
+                $v = trim((string) ($row[$node][$k] ?? ''));
+                if ($v !== '' && !filter_var($v, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6)) {
+                    continue;
+                }
+                if ($v !== '') {
+                    return $v;
+                }
+            }
+        }
+        return '';
     }
 
     private function extractListFromObject(array $obj): array
@@ -3333,6 +3484,8 @@ final class AdminController
             'warn_client_mismatch' => 'اختلاف اطلاعات مشتری بین WHMCS و EasyDCIM',
             'warn_active_port_down' => 'سرویس فعال با پورت شبکه غیرفعال',
             'warn_active_no_traffic' => 'سرویس فعال بدون ترافیک شبکه',
+            'warn_unassigned_possible_match' => 'سرویس آزاد با احتمال مپ اشتباه',
+            'warn_unassigned_possible_match_target' => 'تطابق احتمالی با سرویس‌های WHMCS',
             'm_version' => 'نسخه',
             'm_commit' => 'کامیت',
             'm_update_status' => 'وضعیت آپدیت',
@@ -3534,6 +3687,8 @@ final class AdminController
             'warn_client_mismatch' => 'Client identity mismatch (WHMCS vs EasyDCIM)',
             'warn_active_port_down' => 'Active service with network port down',
             'warn_active_no_traffic' => 'Active service with no network traffic',
+            'warn_unassigned_possible_match' => 'Unassigned service with possible WHMCS match',
+            'warn_unassigned_possible_match_target' => 'Possible match with WHMCS services',
             'm_version' => 'Version',
             'm_commit' => 'Commit',
             'm_update_status' => 'Update Status',

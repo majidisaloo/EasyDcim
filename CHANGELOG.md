@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.61] - 2026-02-19
+### Added
+- `Unassigned Services` table now shows `iLO IP` and `Label` (when available from EasyDCIM payloads).
+### Changed
+- Important Warnings now compares unassigned EasyDCIM items against mapped WHMCS services using `iLO IP`, service IP, and label/domain similarity.
+- Added new warning type for likely unmapped-but-matching services to help fast manual correction.
+
 ## [1.60] - 2026-02-19
 ### Fixed
 - Removed duplicate bulk-progress notice in Servers tab by suppressing top flash when queue is in-progress.

@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.31] - 2026-02-19
+### Fixed
+- Removed automatic outbound release-check call from admin page load to prevent blocking/timeouts while opening module UI.
+- Dashboard `Important Warnings` no longer triggers EasyDCIM API calls during render.
+- Dashboard connection card now reads cached runtime state only (no live network probe on page load).
+### Changed
+- Added explicit cached connection-state writer during `Test EasyDCIM Connection` action.
+- Scoped hosting loader now supports disabling per-service port lookup for fast DB-only rendering paths.
+
 ## [1.30] - 2026-02-19
 ### Fixed
 - EasyDCIM runtime calls now use explicit `CONNECTTIMEOUT` and low-speed fail-safe options to prevent long blocking requests.

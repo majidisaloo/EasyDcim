@@ -124,7 +124,7 @@ final class AdminController
             $tab = 'servers';
         }
 
-        $this->autoRefreshReleaseStatus();
+        // Keep admin load non-blocking: avoid automatic outbound checks on every page view.
         $this->settings = new Settings(Settings::loadFromDatabase());
         $version = Version::current($this->moduleDir);
 
@@ -652,19 +652,7 @@ final class AdminController
 
     private function buildImportantWarnings(): array
     {
-        $baseUrl = $this->settings->getString('easydcim_base_url');
-        $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
-        $easyServices = [];
-        if ($baseUrl !== '' && $token !== '') {
-            try {
-                $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
-                $resp = $client->listServices();
-                $easyServices = $this->extractServiceItems((array) ($resp['data'] ?? []));
-            } catch (\Throwable $e) {
-            }
-        }
-
-        $rows = $this->getScopedHostingServices($easyServices);
+        $rows = $this->getScopedHostingServices([], false);
         if (empty($rows)) {
             return [];
         }
@@ -881,9 +869,11 @@ final class AdminController
             $client = new EasyDcimClient($baseUrl, $token, $useImpersonation, $this->logger, $proxy);
             $probe = $client->pingInfo();
             if (!empty($probe['ok'])) {
+                $this->storeConnectionRuntimeState(['text' => $this->t('m_connected'), 'state' => 'ok']);
                 return ['type' => 'success', 'text' => $this->t('connection_ok')];
             }
             if (!empty($probe['reachable'])) {
+                $this->storeConnectionRuntimeState(['text' => $this->t('m_configured_reachable'), 'state' => 'warn']);
                 return ['type' => 'success', 'text' => $this->t('connection_reachable_limited') . ' (HTTP ' . (int) ($probe['http_code'] ?? 0) . ')'];
             }
             $extra = trim((string) ($probe['error'] ?? ''));
@@ -891,10 +881,24 @@ final class AdminController
             if ($extra === '' && $code > 0) {
                 $extra = 'HTTP ' . $code;
             }
+            $this->storeConnectionRuntimeState(['text' => $this->t('m_configured_disconnected'), 'state' => 'warn']);
             return ['type' => 'warning', 'text' => $this->t('connection_unhealthy') . ($extra !== '' ? (' (' . $extra . ')') : '')];
         } catch (\Throwable $e) {
+            $this->storeConnectionRuntimeState(['text' => $this->t('m_configured_disconnected'), 'state' => 'warn']);
             return ['type' => 'danger', 'text' => $this->t('connection_failed') . ': ' . $e->getMessage()];
         }
+    }
+
+    private function storeConnectionRuntimeState(array $state): void
+    {
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'conn_runtime_cache_json'],
+            ['meta_value' => json_encode($state, JSON_UNESCAPED_UNICODE), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'conn_runtime_cache_at'],
+            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+        );
     }
 
     private function cleanupLogsNow(): array
@@ -1144,31 +1148,7 @@ final class AdminController
             }
         }
 
-        $state = ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
-        try {
-            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
-            $ping = $client->pingInfo();
-            if (!empty($ping['ok'])) {
-                $state = ['text' => $this->t('m_connected'), 'state' => 'ok'];
-            } elseif (!empty($ping['reachable'])) {
-                $state = ['text' => $this->t('m_configured_reachable'), 'state' => 'warn'];
-            } else {
-                $state = ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
-            }
-        } catch (\Throwable $e) {
-            $state = ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
-            $this->logger->log('WARNING', 'connection_runtime_probe_failed', ['error' => $e->getMessage()]);
-        }
-
-        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
-            ['meta_key' => 'conn_runtime_cache_json'],
-            ['meta_value' => json_encode($state, JSON_UNESCAPED_UNICODE), 'updated_at' => date('Y-m-d H:i:s')]
-        );
-        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
-            ['meta_key' => 'conn_runtime_cache_at'],
-            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
-        );
-        return $state;
+        return ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
     }
 
     private function checkReleaseUpdate(): array
@@ -1526,7 +1506,7 @@ final class AdminController
         return $out;
     }
 
-    private function getScopedHostingServices(array $easyServiceItems = []): array
+    private function getScopedHostingServices(array $easyServiceItems = [], bool $withPortLookup = true): array
     {
         $q = Capsule::table('tblhosting as h')
             ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
@@ -1551,7 +1531,7 @@ final class AdminController
         $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
         $apiAvailable = $baseUrl !== '' && $token !== '';
         $client = null;
-        if ($apiAvailable) {
+        if ($apiAvailable && $withPortLookup) {
             $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
         }
         $easyByIp = [];

@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.35] - 2026-02-19
+### Fixed
+- Stopped repeated invalid port lookups by server/item endpoints in servers workflow when `service_id` is missing.
+- Servers mapping now resolves missing `EasyDCIM Service ID` from `Order ID` before any port request.
+### Changed
+- Added admin orders list fallback (`/api/v3/admin/orders`) when `/client/services` returns empty.
+- Added new diagnostics logs: `servers_list_orders_summary` and `servers_list_orders_failed`.
+- Port status lookup now prioritizes service-based endpoint only, with order-based service resolution fallback.
+
 ## [1.34] - 2026-02-19
 ### Fixed
 - Servers `Test` action no longer uses unsupported server-port fallback endpoints as primary path; it now resolves `service_id` from `order_id` and tests `/client/services/{id}/ports`.

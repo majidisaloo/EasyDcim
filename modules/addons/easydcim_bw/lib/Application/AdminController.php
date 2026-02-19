@@ -592,7 +592,73 @@ final class AdminController
             }
         }
 
+        if (empty($merged)) {
+            $orders = $this->fetchEasyServicesFromAdminOrders($client);
+            foreach ($orders as $item) {
+                $k = trim((string) ($item['service_id'] ?? ''));
+                if ($k === '') {
+                    $k = 'o:' . trim((string) ($item['order_id'] ?? ''));
+                }
+                if ($k === '' || isset($seen[$k])) {
+                    continue;
+                }
+                $seen[$k] = true;
+                $merged[] = $item;
+            }
+        }
+
         return $merged;
+    }
+
+    private function fetchEasyServicesFromAdminOrders(EasyDcimClient $client): array
+    {
+        $out = [];
+        for ($page = 1; $page <= 2; $page++) {
+            try {
+                $resp = $client->listAdminOrders(['page' => $page, 'per_page' => 100]);
+                $orders = $this->extractListFromObject((array) ($resp['data'] ?? []));
+                $this->logger->log('INFO', 'servers_list_orders_summary', [
+                    'page' => $page,
+                    'http_code' => (int) ($resp['http_code'] ?? 0),
+                    'items' => count($orders),
+                ]);
+                if (empty($orders)) {
+                    break;
+                }
+                foreach ($orders as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $serviceId = trim((string) ($row['service_id'] ?? $row['serviceId'] ?? ''));
+                    if ($serviceId === '' && isset($row['service']) && is_array($row['service'])) {
+                        $serviceId = trim((string) ($row['service']['id'] ?? $row['service']['service_id'] ?? ''));
+                    }
+                    $serverId = trim((string) ($row['related_id'] ?? $row['server_id'] ?? $row['item_id'] ?? ''));
+                    $ip = trim((string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? ''));
+                    if ($ip === '' && isset($row['related']) && is_array($row['related'])) {
+                        $ip = trim((string) ($row['related']['ip'] ?? $row['related']['dedicated_ip'] ?? $row['related']['ipv4'] ?? ''));
+                    }
+                    if ($ip === '' && isset($row['service']) && is_array($row['service'])) {
+                        $ip = trim((string) ($row['service']['ip'] ?? $row['service']['dedicated_ip'] ?? $row['service']['ipv4'] ?? ''));
+                    }
+                    $out[] = [
+                        'service_id' => $serviceId,
+                        'server_id' => $serverId,
+                        'order_id' => trim((string) ($row['id'] ?? $row['order_id'] ?? $row['orderId'] ?? '')),
+                        'ip' => $ip,
+                        'status' => (string) ($row['status'] ?? ''),
+                        'is_up' => false,
+                    ];
+                }
+                if (count($orders) < 100) {
+                    break;
+                }
+            } catch (\Throwable $e) {
+                $this->logger->log('WARNING', 'servers_list_orders_failed', ['page' => $page, 'error' => $e->getMessage()]);
+                break;
+            }
+        }
+        return $out;
     }
 
     private function renderLogsTab(): void
@@ -1693,10 +1759,11 @@ final class AdminController
             if ($client instanceof EasyDcimClient) {
                 try {
                     $email = (string) ($r->email ?? '');
+                    if ($resolvedService === '' && $resolvedOrder !== '') {
+                        $resolvedService = $this->resolveServiceIdFromOrder($client, $resolvedOrder);
+                    }
                     if ($resolvedService !== '') {
                         $ports = $client->ports($resolvedService, true, $email);
-                    } elseif ($resolvedServer !== '') {
-                        $ports = $client->portsByServer($resolvedServer, true, $email);
                     } else {
                         $ports = ['data' => []];
                     }

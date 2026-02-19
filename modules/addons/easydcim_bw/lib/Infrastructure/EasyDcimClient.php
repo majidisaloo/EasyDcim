@@ -105,6 +105,11 @@ final class EasyDcimClient
         return $this->request('GET', '/api/v3/admin/orders/' . rawurlencode($orderId), null, null, false, 5);
     }
 
+    public function listAdminOrders(array $query = []): array
+    {
+        return $this->request('GET', '/api/v3/admin/orders', null, null, false, 5, $query);
+    }
+
     public function pingInfo(): array
     {
         if ($this->baseUrl === '' || $this->token === '') {

@@ -2,6 +2,23 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.25] - 2026-02-19
+### Fixed
+- Dashboard update-state card now follows release-update status only (removed stale commit-update flag path that could show false yellow state).
+- Servers view now filters to `Active` and `Suspended` services only (no pending/cancelled rows).
+### Added
+- Clickable links in servers table for service and client (direct WHMCS admin pages).
+- `Important Warnings` section under preflight with actionable alerts.
+### Changed
+- Servers matching logic expanded to use `Order ID`, `Server ID`, `Service ID`, and IP fallback.
+- Order ID is now shown in servers table.
+- Client ID display removed from servers table (name-only display with link).
+- Network-port analysis now excludes management ports (`iLO/iDRAC/BMC/IPMI/MGMT/KVM`) for warnings and status summaries.
+- Added warnings for:
+  - shared EasyDCIM server among multiple active services,
+  - active service with all network ports down,
+  - active service with no network traffic.
+
 ## [1.24] - 2026-02-19
 ### Added
 - `Allow Self-Signed SSL` option in EasyDCIM connection tab (enabled by default) for IP-based/self-signed deployments.

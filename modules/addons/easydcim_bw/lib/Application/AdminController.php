@@ -183,7 +183,6 @@ final class AdminController
 
     private function renderDashboardTab(array $version, string $moduleLink): void
     {
-        $updateAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_available')->value('meta_value') === '1';
         $lastPollAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
         $apiFailCount = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
         $updateLock = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
@@ -199,7 +198,7 @@ final class AdminController
         echo '<div class="edbw-metrics">';
         $this->renderMetricCard($this->t('m_version'), (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
         $this->renderMetricCard($this->t('m_commit'), (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
-        $this->renderMetricCard($this->t('m_update_status'), $updateAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $updateAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
+        $this->renderMetricCard($this->t('m_update_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
         $this->renderMetricCard($this->t('m_release_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M6 4h12v4H6zM5 10h14v10H5zM10 14h4"></path></svg>');
         $this->renderMetricCard($this->t('m_cron_poll'), $lastPollAt !== '' ? $lastPollAt : $this->t('m_no_data'), $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
         $this->renderMetricCard($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
@@ -222,6 +221,7 @@ final class AdminController
         echo '</div>';
 
         $this->renderPreflightPanel();
+        $this->renderImportantWarningsPanel();
     }
 
     private function renderMetricCard(string $title, string $value, string $state, string $iconSvg): void
@@ -452,20 +452,22 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
         foreach ($services as $svc) {
             echo '<tr>';
-            echo '<td>#' . (int) $svc['serviceid'] . '</td>';
-            echo '<td>#' . (int) $svc['userid'] . ' - ' . htmlspecialchars((string) $svc['firstname'] . ' ' . (string) $svc['lastname']) . '</td>';
+            echo '<td><a href="' . htmlspecialchars((string) $svc['service_url']) . '">#' . (int) $svc['serviceid'] . '</a></td>';
+            echo '<td><a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a></td>';
             echo '<td>' . (int) $svc['pid'] . '</td>';
             echo '<td>' . htmlspecialchars((string) $svc['ip']) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($svc['easydcim_order_id'] ?: '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($svc['easydcim_service_id'] ?: '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($svc['easydcim_server_id'] ?: '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) $svc['ports_summary']) . '</td>';
+            echo '<td>' . htmlspecialchars($this->domainStatusLabel((string) ($svc['domainstatus'] ?? ''))) . '</td>';
             echo '</tr>';
         }
         if (empty($services)) {
-            echo '<tr><td colspan="7">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+            echo '<tr><td colspan="9">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
         echo '</div>';
@@ -576,6 +578,92 @@ final class AdminController
             echo '<div class="alert alert-success">' . htmlspecialchars($this->t('preflight_ok')) . '</div>';
         }
         echo '</div>';
+    }
+
+    private function renderImportantWarningsPanel(): void
+    {
+        $warnings = $this->buildImportantWarnings();
+        echo '<div class="edbw-panel">';
+        echo '<h3>' . htmlspecialchars($this->t('important_warnings')) . '</h3>';
+        if (empty($warnings)) {
+            echo '<div class="alert alert-success">' . htmlspecialchars($this->t('no_important_warnings')) . '</div>';
+            echo '</div>';
+            return;
+        }
+        echo '<div class="edbw-table-wrap">';
+        echo '<table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('warning_type')) . '</th><th>' . htmlspecialchars($this->t('details')) . '</th></tr></thead><tbody>';
+        foreach ($warnings as $w) {
+            echo '<tr><td>' . htmlspecialchars($w['type']) . '</td><td>' . $w['text'] . '</td></tr>';
+        }
+        echo '</tbody></table></div>';
+        echo '</div>';
+    }
+
+    private function buildImportantWarnings(): array
+    {
+        $baseUrl = $this->settings->getString('easydcim_base_url');
+        $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+        $easyServices = [];
+        if ($baseUrl !== '' && $token !== '') {
+            try {
+                $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+                $resp = $client->listServices();
+                $easyServices = $this->extractServiceItems((array) ($resp['data'] ?? []));
+            } catch (\Throwable $e) {
+            }
+        }
+
+        $rows = $this->getScopedHostingServices($easyServices);
+        if (empty($rows)) {
+            return [];
+        }
+        $warnings = [];
+
+        $activeRows = array_values(array_filter($rows, static fn (array $r): bool => strtolower((string) ($r['domainstatus'] ?? '')) === 'active'));
+        $shared = [];
+        foreach ($activeRows as $r) {
+            $server = trim((string) ($r['easydcim_server_id'] ?? ''));
+            if ($server === '') {
+                continue;
+            }
+            $shared[$server][] = $r;
+        }
+        foreach ($shared as $serverId => $items) {
+            if (count($items) < 2) {
+                continue;
+            }
+            $links = [];
+            foreach ($items as $r) {
+                $links[] = '<a href="' . htmlspecialchars((string) $r['service_url']) . '">#' . (int) $r['serviceid'] . '</a>';
+            }
+            $warnings[] = [
+                'type' => $this->t('warn_shared_server'),
+                'text' => htmlspecialchars($this->t('server_id')) . ': ' . htmlspecialchars($serverId) . ' | ' . implode(' , ', $links),
+            ];
+        }
+
+        foreach ($activeRows as $r) {
+            $networkTotal = (int) ($r['network_ports_total'] ?? 0);
+            $networkUp = (int) ($r['network_ports_up'] ?? 0);
+            $networkTraffic = (float) ($r['network_traffic_total'] ?? 0.0);
+            $serviceLink = '<a href="' . htmlspecialchars((string) $r['service_url']) . '">#' . (int) $r['serviceid'] . '</a>';
+            $clientLink = '<a href="' . htmlspecialchars((string) $r['client_url']) . '">' . htmlspecialchars((string) $r['client_name']) . '</a>';
+
+            if ($networkTotal > 0 && $networkUp === 0) {
+                $warnings[] = [
+                    'type' => $this->t('warn_active_port_down'),
+                    'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink,
+                ];
+            }
+            if ($networkTotal > 0 && $networkTraffic <= 0.0) {
+                $warnings[] = [
+                    'type' => $this->t('warn_active_no_traffic'),
+                    'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink,
+                ];
+            }
+        }
+
+        return $warnings;
     }
 
     private function buildHealthChecks(): array
@@ -1291,6 +1379,7 @@ final class AdminController
                 's.easydcim_service_id as state_service_id',
             ]);
         $this->applyScopeFilter($q);
+        $q->whereIn('h.domainstatus', ['Active', 'Suspended']);
         $rows = $q->orderByDesc('h.id')->limit(300)->get();
         if ($rows->isEmpty()) {
             return [];
@@ -1314,22 +1403,60 @@ final class AdminController
             }
             $easyByIp[$ip] = $item;
         }
+        $easyByService = [];
+        $easyByServer = [];
+        $easyByOrder = [];
+        foreach ($easyServiceItems as $item) {
+            $sid = trim((string) ($item['service_id'] ?? ''));
+            $srv = trim((string) ($item['server_id'] ?? ''));
+            $ord = trim((string) ($item['order_id'] ?? ''));
+            if ($sid !== '') {
+                $easyByService[$sid] = $item;
+            }
+            if ($srv !== '') {
+                $easyByServer[$srv] = $item;
+            }
+            if ($ord !== '') {
+                $easyByOrder[$ord] = $item;
+            }
+        }
 
         $out = [];
         foreach ($rows as $r) {
             $sid = (int) $r->serviceid;
             $svcCf = $cfVals[$sid]['easydcim_service_id'] ?? '';
             $srvCf = $cfVals[$sid]['easydcim_server_id'] ?? '';
+            $ordCf = $cfVals[$sid]['easydcim_order_id'] ?? '';
             $resolvedService = $svcCf !== '' ? $svcCf : (string) ($r->state_service_id ?? '');
             $resolvedServer = $srvCf;
+            $resolvedOrder = $ordCf;
+
+            if ($resolvedService === '' && $resolvedOrder !== '' && isset($easyByOrder[$resolvedOrder])) {
+                $resolvedService = (string) ($easyByOrder[$resolvedOrder]['service_id'] ?? '');
+                if ($resolvedServer === '') {
+                    $resolvedServer = (string) ($easyByOrder[$resolvedOrder]['server_id'] ?? '');
+                }
+            }
+            if ($resolvedService !== '' && isset($easyByService[$resolvedService]) && $resolvedServer === '') {
+                $resolvedServer = (string) ($easyByService[$resolvedService]['server_id'] ?? '');
+            }
+            if ($resolvedService === '' && $resolvedServer !== '' && isset($easyByServer[$resolvedServer])) {
+                $resolvedService = (string) ($easyByServer[$resolvedServer]['service_id'] ?? '');
+            }
             $serviceIp = trim((string) ($r->dedicatedip ?? ''));
             if ($resolvedService === '' && $serviceIp !== '' && isset($easyByIp[$serviceIp])) {
                 $resolvedService = (string) ($easyByIp[$serviceIp]['service_id'] ?? '');
                 if ($resolvedServer === '') {
                     $resolvedServer = (string) ($easyByIp[$serviceIp]['server_id'] ?? '');
                 }
+                if ($resolvedOrder === '') {
+                    $resolvedOrder = (string) ($easyByIp[$serviceIp]['order_id'] ?? '');
+                }
             }
             $portsSummary = $this->t('no_data');
+            $networkPortsTotal = 0;
+            $networkPortsUp = 0;
+            $networkTrafficTotal = 0.0;
 
             if ($client instanceof EasyDcimClient) {
                 try {
@@ -1341,16 +1468,29 @@ final class AdminController
                     } else {
                         $ports = ['data' => []];
                     }
-                    $items = $this->extractServiceItems((array) ($ports['data'] ?? []));
+                    $items = $this->extractPortItems((array) ($ports['data'] ?? []));
                     if (!empty($items)) {
                         $up = 0;
-                        $total = count($items);
+                        $total = 0;
+                        $traffic = 0.0;
                         foreach ($items as $p) {
+                            if (!$this->isNetworkPortCandidate((string) ($p['name'] ?? ''), (string) ($p['description'] ?? ''), (string) ($p['type'] ?? ''))) {
+                                continue;
+                            }
+                            $total++;
                             if (!empty($p['is_up'])) {
                                 $up++;
                             }
+                            $traffic += (float) ($p['traffic_total'] ?? 0.0);
                         }
-                        $portsSummary = $up . '/' . $total . ' ' . $this->t('ports_up');
+                        $networkPortsTotal = $total;
+                        $networkPortsUp = $up;
+                        $networkTrafficTotal = $traffic;
+                        if ($total > 0) {
+                            $portsSummary = $up . '/' . $total . ' ' . $this->t('ports_up');
+                        } else {
+                            $portsSummary = $this->t('network_ports_not_found');
+                        }
                     } elseif ($resolvedService !== '' || $resolvedServer !== '') {
                         $portsSummary = $this->t('ports_not_found');
                     }
@@ -1363,12 +1503,20 @@ final class AdminController
                 'serviceid' => $sid,
                 'userid' => (int) $r->userid,
                 'pid' => (int) $r->pid,
+                'domainstatus' => (string) ($r->domainstatus ?? ''),
                 'firstname' => (string) ($r->firstname ?? ''),
                 'lastname' => (string) ($r->lastname ?? ''),
+                'client_name' => trim((string) ($r->firstname ?? '') . ' ' . (string) ($r->lastname ?? '')) ?: ('#' . (int) $r->userid),
+                'client_url' => 'clientssummary.php?userid=' . (int) $r->userid,
+                'service_url' => 'clientsservices.php?userid=' . (int) $r->userid . '&id=' . $sid,
                 'ip' => (string) ($r->dedicatedip ?? ''),
+                'easydcim_order_id' => $resolvedOrder,
                 'easydcim_service_id' => $resolvedService,
                 'easydcim_server_id' => $resolvedServer,
                 'ports_summary' => $portsSummary,
+                'network_ports_total' => $networkPortsTotal,
+                'network_ports_up' => $networkPortsUp,
+                'network_traffic_total' => $networkTrafficTotal,
             ];
         }
 
@@ -1445,12 +1593,85 @@ final class AdminController
             $normalized[] = [
                 'service_id' => (string) ($row['id'] ?? $row['service_id'] ?? ''),
                 'server_id' => (string) ($row['server_id'] ?? $row['device_id'] ?? $row['item_id'] ?? ''),
+                'order_id' => (string) ($row['order_id'] ?? $row['orderId'] ?? ''),
                 'ip' => (string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? ''),
                 'status' => (string) ($row['status'] ?? $row['state'] ?? ''),
                 'is_up' => $isUp,
             ];
         }
         return $normalized;
+    }
+
+    private function extractPortItems(array $payload): array
+    {
+        $items = [];
+        if (isset($payload['data']) && is_array($payload['data'])) {
+            $items = $payload['data'];
+        } elseif (isset($payload['result']) && is_array($payload['result'])) {
+            $items = $payload['result'];
+        } elseif (array_keys($payload) === range(0, count($payload) - 1)) {
+            $items = $payload;
+        } else {
+            $items = [$payload];
+        }
+
+        $out = [];
+        foreach ($items as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $name = (string) ($row['name'] ?? $row['label'] ?? '');
+            $desc = (string) ($row['description'] ?? $row['note'] ?? '');
+            $type = (string) ($row['type'] ?? $row['port_type'] ?? '');
+            $state = strtolower((string) ($row['status'] ?? $row['state'] ?? ''));
+            $upRaw = $row['is_up'] ?? $row['up'] ?? null;
+            $isUp = false;
+            if (is_bool($upRaw)) {
+                $isUp = $upRaw;
+            } elseif (is_numeric($upRaw)) {
+                $isUp = (int) $upRaw === 1;
+            } elseif (is_string($upRaw) && $upRaw !== '') {
+                $isUp = in_array(strtolower($upRaw), ['1', 'true', 'up', 'active', 'enabled', 'online'], true);
+            } else {
+                $isUp = in_array($state, ['up', 'active', 'enabled', 'online'], true);
+            }
+            $trafficTotal = (float) ($row['traffic_total'] ?? $row['total'] ?? $row['total_1m'] ?? 0.0);
+            $out[] = [
+                'name' => $name,
+                'description' => $desc,
+                'type' => $type,
+                'is_up' => $isUp,
+                'traffic_total' => $trafficTotal,
+            ];
+        }
+
+        return $out;
+    }
+
+    private function isNetworkPortCandidate(string $name, string $description, string $type): bool
+    {
+        $haystack = strtolower(trim($name . ' ' . $description . ' ' . $type));
+        if ($haystack === '') {
+            return true;
+        }
+        foreach (['ilo', 'idrac', 'bmc', 'ipmi', 'mgmt', 'management', 'kvm'] as $bad) {
+            if (str_contains($haystack, $bad)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function domainStatusLabel(string $status): string
+    {
+        $s = strtolower(trim($status));
+        if ($s === 'active') {
+            return $this->t('active');
+        }
+        if ($s === 'suspended') {
+            return $this->isFa ? 'مسدود' : 'Suspended';
+        }
+        return $status !== '' ? $status : '-';
     }
 
     private function proxyConfig(): array
@@ -1561,10 +1782,19 @@ final class AdminController
             'client' => 'مشتری',
             'ports_status' => 'وضعیت پورت‌ها',
             'ports_up' => 'پورت بالا',
+            'network_ports_not_found' => 'پورت شبکه‌ای پیدا نشد',
             'ports_not_found' => 'پورتی پیدا نشد',
             'ports_error' => 'خطا در بررسی پورت',
             'status' => 'وضعیت',
             'no_rows' => 'موردی یافت نشد',
+            'order_id' => 'Order ID',
+            'server_id' => 'Server ID',
+            'important_warnings' => 'Important Warnings',
+            'no_important_warnings' => 'مورد مهمی برای هشدار فوری پیدا نشد.',
+            'warning_type' => 'نوع هشدار',
+            'warn_shared_server' => 'سرور مشترک بین سرویس‌های فعال',
+            'warn_active_port_down' => 'سرویس فعال با پورت شبکه غیرفعال',
+            'warn_active_no_traffic' => 'سرویس فعال بدون ترافیک شبکه',
             'm_version' => 'نسخه',
             'm_commit' => 'کامیت',
             'm_update_status' => 'وضعیت آپدیت',
@@ -1718,10 +1948,19 @@ final class AdminController
             'client' => 'Client',
             'ports_status' => 'Ports Status',
             'ports_up' => 'ports up',
+            'network_ports_not_found' => 'No network ports detected',
             'ports_not_found' => 'No ports found',
             'ports_error' => 'Port lookup failed',
             'status' => 'Status',
             'no_rows' => 'No rows found',
+            'order_id' => 'Order ID',
+            'server_id' => 'Server ID',
+            'important_warnings' => 'Important Warnings',
+            'no_important_warnings' => 'No critical warnings found.',
+            'warning_type' => 'Warning Type',
+            'warn_shared_server' => 'Shared server among active services',
+            'warn_active_port_down' => 'Active service with network port down',
+            'warn_active_no_traffic' => 'Active service with no network traffic',
             'm_version' => 'Version',
             'm_commit' => 'Commit',
             'm_update_status' => 'Update Status',

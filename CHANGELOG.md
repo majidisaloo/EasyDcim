@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.73] - 2026-02-19
+### Fixed
+- Manual single-service test now retries `client/services/{id}/ports` without impersonation on HTTP `422` (in addition to `401/403`) before final failure.
+- This reduces false-negative test failures when a resolved service ID is valid in admin context but rejected under current impersonation constraints.
+
 ## [1.72] - 2026-02-19
 ### Fixed
 - Strengthened Servers batch AJAX transport for strict WHMCS admin environments:

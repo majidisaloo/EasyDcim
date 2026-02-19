@@ -1725,7 +1725,7 @@ final class AdminController
                     $mode = 'service_id:' . $candidateSource;
                     break;
                 }
-                if (!$bulkMode && ($candidateCode === 401 || $candidateCode === 403) && $useImpersonation) {
+                if (!$bulkMode && ($candidateCode === 401 || $candidateCode === 403 || $candidateCode === 422) && $useImpersonation) {
                     $fallbackClient = new EasyDcimClient($baseUrl, $token, false, $this->logger, $this->proxyConfig());
                     $fallbackResp = $fallbackClient->ports($candidateId, true, null, false);
                     $fallbackCode = (int) ($fallbackResp['http_code'] ?? 0);

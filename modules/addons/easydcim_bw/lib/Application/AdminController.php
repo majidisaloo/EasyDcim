@@ -41,6 +41,7 @@ final class AdminController
         $action = $_REQUEST['action'] ?? '';
         $api = isset($_GET['api']) ? (string) $_GET['api'] : '';
         $tab = (string) ($_REQUEST['tab'] ?? 'dashboard');
+        $ajax = $this->isAjaxRequest();
         $flash = [];
 
         if ($api === 'purchase_logs') {
@@ -125,22 +126,41 @@ final class AdminController
             $tab = 'servers';
         }
         if ($action === 'refresh_servers_cache') {
-            $flash[] = $this->refreshServersCacheNow();
+            $result = $this->refreshServersCacheNow();
+            if ($ajax) {
+                $this->json($this->buildBatchAjaxPayload($result));
+                return;
+            }
+            $flash[] = $result;
             $tab = 'servers';
         }
         if ($action === 'test_all_services') {
             $result = $this->testAllServices();
+            if ($ajax) {
+                $this->json($this->buildBatchAjaxPayload($result));
+                return;
+            }
             if (!($result['silent'] ?? false)) {
                 $flash[] = $result;
             }
             $tab = 'servers';
         }
         if ($action === 'reset_test_all_services') {
-            $flash[] = $this->resetTestAllServices();
+            $result = $this->resetTestAllServices();
+            if ($ajax) {
+                $this->json($this->buildBatchAjaxPayload($result));
+                return;
+            }
+            $flash[] = $result;
             $tab = 'servers';
         }
         if ($action === 'stop_test_all_services') {
-            $flash[] = $this->stopTestAllServices();
+            $result = $this->stopTestAllServices();
+            if ($ajax) {
+                $this->json($this->buildBatchAjaxPayload($result));
+                return;
+            }
+            $flash[] = $result;
             $tab = 'servers';
         }
 
@@ -460,7 +480,6 @@ final class AdminController
         $baseUrl = $this->settings->getString('easydcim_base_url');
         $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
         $apiAvailable = $baseUrl !== '' && $token !== '';
-        $autoBatch = isset($_REQUEST['autobatch']) && (string) $_REQUEST['autobatch'] === '1';
         $easyServices = $this->getEasyServicesCacheOnly();
         $services = $this->getScopedHostingServices($easyServices, false, false);
 
@@ -475,51 +494,84 @@ final class AdminController
             $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_at')->value('meta_value');
             echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_cache_at')) . ': ' . htmlspecialchars($cacheAt !== '' ? $cacheAt : $this->t('m_no_data')) . '</p>';
             echo '<div class="edbw-server-actions">';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-refresh-cache-form">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="refresh_servers_cache">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_refresh_cache')) . '</button>';
             echo '</form>';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-form">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="test_all_services">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all')) . '</button>';
             echo '</form>';
             $testAllState = $this->getTestAllState();
-            if (($testAllState['remaining'] ?? 0) > 0) {
-                echo '<form method="post" id="edbw-test-all-continue-form" class="edbw-form-inline edbw-action-card">';
-                echo '<input type="hidden" name="tab" value="servers">';
-                echo '<input type="hidden" name="action" value="test_all_services">';
-                echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
-                echo '</form>';
-                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
-                echo '<input type="hidden" name="tab" value="servers">';
-                echo '<input type="hidden" name="action" value="stop_test_all_services">';
-                echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_stop')) . '</button>';
-                echo '</form>';
-                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
-                echo '<input type="hidden" name="tab" value="servers">';
-                echo '<input type="hidden" name="action" value="reset_test_all_services">';
-                echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_reset')) . '</button>';
-                echo '</form>';
-                echo '<div class="alert alert-info">' . htmlspecialchars($this->t('servers_test_all_progress')) . ': '
-                    . (int) ($testAllState['done'] ?? 0) . '/' . (int) ($testAllState['total'] ?? 0)
-                    . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
-                    . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
-                    . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')</div>';
-                if ($autoBatch) {
-                    $nextUrl = 'addonmodules.php?module=easydcim_bw&tab=servers&action=test_all_services&autobatch=1';
-                    echo '<meta http-equiv="refresh" content="1;url=' . htmlspecialchars($nextUrl) . '">';
-                } else {
-                    echo '<script>(function(){var f=document.getElementById("edbw-test-all-continue-form");if(!f){return;}setTimeout(function(){try{f.submit();}catch(e){}},1000);})();</script>';
-                }
-            }
+            $runningNow = ((int) ($testAllState['remaining'] ?? 0) > 0);
+            echo '<form method="post" id="edbw-test-all-continue-form" class="edbw-form-inline edbw-action-card" style="' . ($runningNow ? '' : 'display:none;') . '">';
+            echo '<input type="hidden" name="tab" value="servers">';
+            echo '<input type="hidden" name="action" value="test_all_services">';
+            echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
+            echo '</form>';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-stop-form" style="' . ($runningNow ? '' : 'display:none;') . '">';
+            echo '<input type="hidden" name="tab" value="servers">';
+            echo '<input type="hidden" name="action" value="stop_test_all_services">';
+            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_stop')) . '</button>';
+            echo '</form>';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-reset-form" style="' . ($runningNow ? '' : 'display:none;') . '">';
+            echo '<input type="hidden" name="tab" value="servers">';
+            echo '<input type="hidden" name="action" value="reset_test_all_services">';
+            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_reset')) . '</button>';
+            echo '</form>';
+            echo '<div class="alert alert-info" id="edbw-test-all-progress" style="' . ($runningNow ? '' : 'display:none;') . '">';
+            echo htmlspecialchars($this->t('servers_test_all_progress')) . ': '
+                . (int) ($testAllState['done'] ?? 0) . '/' . (int) ($testAllState['total'] ?? 0)
+                . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
+                . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
+                . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')';
+            echo '</div>';
+            echo '<div id="edbw-test-all-status" class="edbw-help"></div>';
             echo '</div>';
             if (count($easyServices) === 0 && $cacheAt === '') {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
             } elseif (count($easyServices) === 0) {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_empty_hint')) . '</div>';
             }
+            echo '<script>(function(){'
+                . 'var running=false;var timer=null;'
+                . 'var formTest=document.getElementById("edbw-test-all-form");'
+                . 'var formCont=document.getElementById("edbw-test-all-continue-form");'
+                . 'var formStop=document.getElementById("edbw-test-all-stop-form");'
+                . 'var formReset=document.getElementById("edbw-test-all-reset-form");'
+                . 'var formRefresh=document.getElementById("edbw-refresh-cache-form");'
+                . 'var progress=document.getElementById("edbw-test-all-progress");'
+                . 'var status=document.getElementById("edbw-test-all-status");'
+                . 'function post(action){'
+                . 'var fd=new FormData();fd.append("tab","servers");fd.append("action",action);fd.append("ajax","1");'
+                . 'return fetch(window.location.pathname + window.location.search,{method:"POST",body:fd,credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest"}}).then(function(r){return r.json();});}'
+                . 'function setRunning(v){running=!!v;'
+                . 'if(formCont){formCont.style.display=running?"":"none";}'
+                . 'if(formStop){formStop.style.display=running?"":"none";}'
+                . 'if(formReset){formReset.style.display=running?"":"none";}'
+                . '}'
+                . 'function render(payload){'
+                . 'if(!payload){return;}'
+                . 'if(status && payload.message){status.textContent=payload.message;status.style.color=(payload.type==="danger"?"#b91c1c":(payload.type==="warning"?"#b45309":"#0f766e"));}'
+                . 'if(payload.state && progress){'
+                . 'if(payload.state.running){progress.style.display="block";progress.textContent="' . addslashes($this->t('servers_test_all_progress')) . ': "+payload.state.done+"/"+payload.state.total+" (OK: "+payload.state.ok+", WARN: "+payload.state.warn+", FAIL: "+payload.state.fail+")";}'
+                . 'else{progress.style.display="none";}'
+                . '}'
+                . 'setRunning(payload.state && payload.state.running);'
+                . '}'
+                . 'function tick(){if(!running){return;}'
+                . 'post("test_all_services").then(function(j){render(j);if(j && j.state && j.state.running && running){timer=setTimeout(tick,1000);}else{running=false;}}).catch(function(){running=false;if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});}'
+                . 'function bind(form,action,loop){if(!form){return;}form.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}'
+                . 'if(action==="stop_test_all_services"||action==="reset_test_all_services"){running=false;}'
+                . 'post(action).then(function(j){render(j);if(loop && j && j.state && j.state.running){running=true;tick();}}).catch(function(){if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});});}'
+                . 'bind(formTest,"test_all_services",true);'
+                . 'bind(formCont,"test_all_services",true);'
+                . 'bind(formStop,"stop_test_all_services",false);'
+                . 'bind(formReset,"reset_test_all_services",false);'
+                . 'bind(formRefresh,"refresh_servers_cache",false);'
+                . '})();</script>';
         }
         echo '</div>';
 
@@ -2037,6 +2089,35 @@ final class AdminController
     {
         header('Content-Type: application/json');
         echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    private function isAjaxRequest(): bool
+    {
+        if (isset($_POST['ajax']) && (string) $_POST['ajax'] === '1') {
+            return true;
+        }
+        $hdr = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''));
+        return $hdr === 'xmlhttprequest';
+    }
+
+    private function buildBatchAjaxPayload(array $result): array
+    {
+        $state = $this->getTestAllState();
+        $running = (int) ($state['remaining'] ?? 0) > 0;
+        return [
+            'type' => (string) ($result['type'] ?? 'info'),
+            'message' => (string) ($result['text'] ?? ''),
+            'silent' => (bool) ($result['silent'] ?? false),
+            'state' => [
+                'total' => (int) ($state['total'] ?? 0),
+                'done' => (int) ($state['done'] ?? 0),
+                'ok' => (int) ($state['ok'] ?? 0),
+                'warn' => (int) ($state['warn'] ?? 0),
+                'fail' => (int) ($state['fail'] ?? 0),
+                'remaining' => (int) ($state['remaining'] ?? 0),
+                'running' => $running,
+            ],
+        ];
     }
 
     private function addPackage(): void

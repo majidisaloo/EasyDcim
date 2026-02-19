@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.62] - 2026-02-19
+### Changed
+- Servers `Test All` flow is now AJAX-driven (no full page refresh on each batch step).
+- Bulk progress now updates live inside the same page while queue runs.
+- Added live button-state behavior:
+  - running: show `Continue`, `Stop`, `Reset`
+  - stopped/finished: hide those controls and keep `Test All`.
+- `Refresh Cache` action in Servers tab is now AJAX-backed for smoother UX.
+
 ## [1.61] - 2026-02-19
 ### Added
 - `Unassigned Services` table now shows `iLO IP` and `Label` (when available from EasyDCIM payloads).

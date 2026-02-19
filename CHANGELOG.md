@@ -2,6 +2,16 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.27] - 2026-02-19
+### Fixed
+- Servers tab now supports wider custom-field aliases (`Order ID`, `Server ID`, `Service ID`) so mapped data is detected more reliably.
+- Per-service API test action added and logs detailed result/error into module logs for faster troubleshooting.
+- API lookup failures in servers mapping are now explicitly logged (`servers_ports_lookup_failed`, `server_item_test`, `server_item_test_exception`).
+### Changed
+- Servers table now includes per-row `Test` action.
+- Important warnings are consolidated per service (multiple issues in one line instead of repeated rows).
+- Logs details column now keeps larger context payload (up to 1200 chars) for API debugging.
+
 ## [1.26] - 2026-02-19
 ### Fixed
 - Removed stale commit-based update flag usage from dashboard update card (now release-state only).

@@ -119,6 +119,10 @@ final class AdminController
             $flash[] = $this->saveProductPlan();
             $tab = 'scope';
         }
+        if ($action === 'test_service_item') {
+            $flash[] = $this->testServiceItem();
+            $tab = 'servers';
+        }
 
         $this->autoRefreshReleaseStatus();
         $this->settings = new Settings(Settings::loadFromDatabase());
@@ -455,7 +459,7 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
         foreach ($services as $svc) {
             echo '<tr>';
             echo '<td><a href="' . htmlspecialchars((string) $svc['service_url']) . '">#' . (int) $svc['serviceid'] . '</a></td>';
@@ -467,10 +471,11 @@ final class AdminController
             echo '<td>' . htmlspecialchars((string) ($svc['easydcim_server_id'] ?: '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) $svc['ports_summary']) . '</td>';
             echo '<td>' . htmlspecialchars($this->domainStatusLabel((string) ($svc['domainstatus'] ?? ''))) . '</td>';
+            echo '<td><form method="post" class="edbw-form-inline" style="margin:0;padding:0;border:0;background:none"><input type="hidden" name="tab" value="servers"><input type="hidden" name="action" value="test_service_item"><input type="hidden" name="test_serviceid" value="' . (int) $svc['serviceid'] . '"><button type="submit" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('test')) . '</button></form></td>';
             echo '</tr>';
         }
         if (empty($services)) {
-            echo '<tr><td colspan="9">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+            echo '<tr><td colspan="10">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
         echo '</div>';
@@ -515,8 +520,8 @@ final class AdminController
         echo '<table class="table table-striped"><thead><tr><th>Level</th><th>Message</th><th>Source</th><th>Details</th><th>Time</th></tr></thead><tbody>';
         foreach ($logs as $log) {
             $ctx = (string) ($log['context_json'] ?? '');
-            if (strlen($ctx) > 260) {
-                $ctx = substr($ctx, 0, 260) . '...';
+            if (strlen($ctx) > 1200) {
+                $ctx = substr($ctx, 0, 1200) . '...';
             }
             echo '<tr>';
             echo '<td>' . htmlspecialchars((string) $log['level']) . '</td>';
@@ -645,25 +650,41 @@ final class AdminController
             ];
         }
 
+        $byService = [];
         foreach ($activeRows as $r) {
             $networkTotal = (int) ($r['network_ports_total'] ?? 0);
             $networkUp = (int) ($r['network_ports_up'] ?? 0);
             $networkTraffic = (float) ($r['network_traffic_total'] ?? 0.0);
-            $serviceLink = '<a href="' . htmlspecialchars((string) $r['service_url']) . '">#' . (int) $r['serviceid'] . '</a>';
-            $clientLink = '<a href="' . htmlspecialchars((string) $r['client_url']) . '">' . htmlspecialchars((string) $r['client_name']) . '</a>';
+            $serviceKey = (int) ($r['serviceid'] ?? 0);
+            if ($serviceKey <= 0) {
+                continue;
+            }
+            if (!isset($byService[$serviceKey])) {
+                $byService[$serviceKey] = [
+                    'row' => $r,
+                    'issues' => [],
+                ];
+            }
 
             if ($networkTotal > 0 && $networkUp === 0) {
-                $warnings[] = [
-                    'type' => $this->t('warn_active_port_down'),
-                    'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink,
-                ];
+                $byService[$serviceKey]['issues'][] = $this->t('warn_active_port_down');
             }
             if ($networkTotal > 0 && $networkTraffic <= 0.0) {
-                $warnings[] = [
-                    'type' => $this->t('warn_active_no_traffic'),
-                    'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink,
-                ];
+                $byService[$serviceKey]['issues'][] = $this->t('warn_active_no_traffic');
             }
+        }
+        foreach ($byService as $bundle) {
+            if (empty($bundle['issues'])) {
+                continue;
+            }
+            $row = $bundle['row'];
+            $issues = array_values(array_unique($bundle['issues']));
+            $serviceLink = '<a href="' . htmlspecialchars((string) $row['service_url']) . '">#' . (int) $row['serviceid'] . '</a>';
+            $clientLink = '<a href="' . htmlspecialchars((string) $row['client_url']) . '">' . htmlspecialchars((string) $row['client_name']) . '</a>';
+            $warnings[] = [
+                'type' => $this->t('warn_service_issues'),
+                'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink . ' | ' . implode(' ، ', array_map('htmlspecialchars', $issues)),
+            ];
         }
 
         return $warnings;
@@ -959,6 +980,67 @@ final class AdminController
             return ['type' => 'success', 'text' => 'Product plan saved for PID ' . $pid];
         } catch (\Throwable $e) {
             return ['type' => 'danger', 'text' => 'Failed to save product plan: ' . $e->getMessage()];
+        }
+    }
+
+    private function testServiceItem(): array
+    {
+        try {
+            $serviceId = (int) ($_POST['test_serviceid'] ?? 0);
+            if ($serviceId <= 0) {
+                return ['type' => 'danger', 'text' => $this->t('invalid_service')];
+            }
+
+            $baseUrl = $this->settings->getString('easydcim_base_url');
+            $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+            if ($baseUrl === '' || $token === '') {
+                return ['type' => 'warning', 'text' => $this->t('base_or_token_missing')];
+            }
+
+            $rows = $this->getScopedHostingServices();
+            $target = null;
+            foreach ($rows as $row) {
+                if ((int) ($row['serviceid'] ?? 0) === $serviceId) {
+                    $target = $row;
+                    break;
+                }
+            }
+            if (!$target) {
+                return ['type' => 'warning', 'text' => $this->t('service_not_found_scope')];
+            }
+
+            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+            $email = (string) ($target['email'] ?? '');
+            $response = ['http_code' => 0, 'error' => ''];
+            $mode = 'none';
+            if ((string) ($target['easydcim_service_id'] ?? '') !== '') {
+                $mode = 'service_id';
+                $response = $client->ports((string) $target['easydcim_service_id'], true, $email);
+            } elseif ((string) ($target['easydcim_server_id'] ?? '') !== '') {
+                $mode = 'server_id';
+                $response = $client->portsByServer((string) $target['easydcim_server_id'], true, $email);
+            }
+            $code = (int) ($response['http_code'] ?? 0);
+            $err = trim((string) ($response['error'] ?? ''));
+            $ok = $code >= 200 && $code < 300;
+
+            $this->logger->log($ok ? 'INFO' : 'WARNING', 'server_item_test', [
+                'serviceid' => $serviceId,
+                'mode' => $mode,
+                'http_code' => $code,
+                'error' => $err,
+                'easydcim_service_id' => (string) ($target['easydcim_service_id'] ?? ''),
+                'easydcim_server_id' => (string) ($target['easydcim_server_id'] ?? ''),
+                'easydcim_order_id' => (string) ($target['easydcim_order_id'] ?? ''),
+            ]);
+
+            if ($ok) {
+                return ['type' => 'success', 'text' => $this->t('test_ok') . ' (HTTP ' . $code . ', ' . $this->t('mode') . ': ' . $mode . ')'];
+            }
+            return ['type' => 'warning', 'text' => $this->t('test_failed') . ' (HTTP ' . $code . ($err !== '' ? ', ' . $err : '') . ')'];
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'server_item_test_exception', ['error' => $e->getMessage()]);
+            return ['type' => 'danger', 'text' => $this->t('test_failed') . ': ' . $e->getMessage()];
         }
     }
 
@@ -1500,22 +1582,30 @@ final class AdminController
                         } else {
                             $portsSummary = $this->t('network_ports_not_found');
                         }
-                    } elseif ($resolvedService !== '' || $resolvedServer !== '') {
-                        $portsSummary = $this->t('ports_not_found');
-                    }
-                } catch (\Throwable $e) {
-                    $portsSummary = $this->t('ports_error');
+                } elseif ($resolvedService !== '' || $resolvedServer !== '') {
+                    $portsSummary = $this->t('ports_not_found');
                 }
+            } catch (\Throwable $e) {
+                $portsSummary = $this->t('ports_error');
+                $this->logger->log('WARNING', 'servers_ports_lookup_failed', [
+                    'serviceid' => $sid,
+                    'error' => $e->getMessage(),
+                    'easydcim_service_id' => $resolvedService,
+                    'easydcim_server_id' => $resolvedServer,
+                    'easydcim_order_id' => $resolvedOrder,
+                ]);
             }
+        }
 
-            $out[] = [
+        $out[] = [
                 'serviceid' => $sid,
                 'userid' => (int) $r->userid,
                 'pid' => (int) $r->pid,
                 'domainstatus' => (string) ($r->domainstatus ?? ''),
-                'firstname' => (string) ($r->firstname ?? ''),
-                'lastname' => (string) ($r->lastname ?? ''),
-                'client_name' => trim((string) ($r->firstname ?? '') . ' ' . (string) ($r->lastname ?? '')) ?: ('#' . (int) $r->userid),
+            'firstname' => (string) ($r->firstname ?? ''),
+            'lastname' => (string) ($r->lastname ?? ''),
+            'email' => (string) ($r->email ?? ''),
+            'client_name' => trim((string) ($r->firstname ?? '') . ' ' . (string) ($r->lastname ?? '')) ?: ('#' . (int) $r->userid),
                 'client_url' => 'clientssummary.php?userid=' . (int) $r->userid,
                 'service_url' => 'clientsservices.php?userid=' . (int) $r->userid . '&id=' . $sid,
                 'ip' => (string) ($r->dedicatedip ?? ''),
@@ -1541,13 +1631,26 @@ final class AdminController
         $fields = Capsule::table('tblcustomfields')
             ->where('type', 'product')
             ->get(['id', 'fieldname']);
+        $aliases = [
+            'easydcim_service_id' => 'easydcim_service_id',
+            'service id' => 'easydcim_service_id',
+            'serviceid' => 'easydcim_service_id',
+            'easydcim order id' => 'easydcim_order_id',
+            'easydcim_order_id' => 'easydcim_order_id',
+            'order id' => 'easydcim_order_id',
+            'orderid' => 'easydcim_order_id',
+            'easydcim server id' => 'easydcim_server_id',
+            'easydcim_server_id' => 'easydcim_server_id',
+            'server id' => 'easydcim_server_id',
+            'serverid' => 'easydcim_server_id',
+        ];
         $fieldById = [];
         foreach ($fields as $f) {
             $normalized = strtolower(trim(explode('|', (string) $f->fieldname)[0]));
-            if (!in_array($normalized, ['easydcim_service_id', 'easydcim_order_id', 'easydcim_server_id'], true)) {
+            if (!isset($aliases[$normalized])) {
                 continue;
             }
-            $fieldById[(int) $f->id] = $normalized;
+            $fieldById[(int) $f->id] = $aliases[$normalized];
         }
         if (empty($fieldById)) {
             return [];
@@ -1788,6 +1891,12 @@ final class AdminController
             'servers_api_loaded' => 'تعداد آیتم دریافتی از EasyDCIM',
             'servers_assigned' => 'سرویس‌های واگذار شده به مشتری',
             'servers_unassigned' => 'سرویس‌های آزاد (بدون اتصال به WHMCS)',
+            'test' => 'تست',
+            'mode' => 'روش',
+            'invalid_service' => 'شناسه سرویس نامعتبر است.',
+            'service_not_found_scope' => 'سرویس در محدوده فعلی پیدا نشد.',
+            'test_ok' => 'تست با موفقیت انجام شد',
+            'test_failed' => 'تست ناموفق بود',
             'service' => 'سرویس',
             'client' => 'مشتری',
             'ports_status' => 'وضعیت پورت‌ها',
@@ -1803,6 +1912,7 @@ final class AdminController
             'no_important_warnings' => 'مورد مهمی برای هشدار فوری پیدا نشد.',
             'warning_type' => 'نوع هشدار',
             'warn_shared_server' => 'سرور مشترک بین سرویس‌های فعال',
+            'warn_service_issues' => 'هشدار سرویس فعال',
             'warn_active_port_down' => 'سرویس فعال با پورت شبکه غیرفعال',
             'warn_active_no_traffic' => 'سرویس فعال بدون ترافیک شبکه',
             'm_version' => 'نسخه',
@@ -1956,6 +2066,12 @@ final class AdminController
             'servers_api_loaded' => 'Items loaded from EasyDCIM',
             'servers_assigned' => 'Assigned Services (WHMCS mapped)',
             'servers_unassigned' => 'Unassigned Services (not mapped to WHMCS)',
+            'test' => 'Test',
+            'mode' => 'Mode',
+            'invalid_service' => 'Invalid service id.',
+            'service_not_found_scope' => 'Service was not found in current scope.',
+            'test_ok' => 'Test completed successfully',
+            'test_failed' => 'Test failed',
             'service' => 'Service',
             'client' => 'Client',
             'ports_status' => 'Ports Status',
@@ -1971,6 +2087,7 @@ final class AdminController
             'no_important_warnings' => 'No critical warnings found.',
             'warning_type' => 'Warning Type',
             'warn_shared_server' => 'Shared server among active services',
+            'warn_service_issues' => 'Active service warning',
             'warn_active_port_down' => 'Active service with network port down',
             'warn_active_no_traffic' => 'Active service with no network traffic',
             'm_version' => 'Version',

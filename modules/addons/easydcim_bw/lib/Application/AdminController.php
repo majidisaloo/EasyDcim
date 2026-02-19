@@ -577,7 +577,8 @@ final class AdminController
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all')) . '</button>';
             echo '</form>';
             $testAllState = $this->getTestAllState();
-            $runningNow = ((int) ($testAllState['remaining'] ?? 0) > 0);
+            $runningNow = ((int) ($testAllState['remaining'] ?? 0) > 0)
+                || ((int) ($testAllState['total'] ?? 0) > (int) ($testAllState['done'] ?? 0));
             echo '<form method="post" id="edbw-test-all-continue-form" class="edbw-form-inline edbw-action-card" style="' . ($runningNow ? '' : 'display:none;') . '">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="test_all_services">';
@@ -2282,6 +2283,8 @@ final class AdminController
     private function buildBatchStatePayload(): array
     {
         $state = $this->getTestAllState();
+        $running = ((int) ($state['remaining'] ?? 0) > 0)
+            || ((int) ($state['total'] ?? 0) > (int) ($state['done'] ?? 0));
         return [
             'total' => (int) ($state['total'] ?? 0),
             'done' => (int) ($state['done'] ?? 0),
@@ -2289,7 +2292,7 @@ final class AdminController
             'warn' => (int) ($state['warn'] ?? 0),
             'fail' => (int) ($state['fail'] ?? 0),
             'remaining' => (int) ($state['remaining'] ?? 0),
-            'running' => (int) ($state['remaining'] ?? 0) > 0,
+            'running' => $running,
         ];
     }
 
@@ -2810,6 +2813,13 @@ final class AdminController
             $state = $this->getTestAllState();
             $queue = $state['queue'];
 
+            // Recover queue when legacy/corrupt state has progress counters but no remaining queue.
+            if (empty($queue) && (int) ($state['total'] ?? 0) > (int) ($state['done'] ?? 0)) {
+                $queue = $this->rebuildTestQueueFromProgress((int) ($state['done'] ?? 0));
+                $state['queue'] = $queue;
+                $state['remaining'] = count($queue);
+            }
+
             if (empty($queue)) {
                 $services = $this->getScopedHostingServices($this->getEasyServicesCacheOnly(), false, false);
                 if (empty($services)) {
@@ -2908,8 +2918,40 @@ final class AdminController
             return ['queue' => [], 'total' => 0, 'done' => 0, 'ok' => 0, 'warn' => 0, 'fail' => 0, 'remaining' => 0];
         }
         $decoded['queue'] = isset($decoded['queue']) && is_array($decoded['queue']) ? $decoded['queue'] : [];
-        $decoded['remaining'] = isset($decoded['remaining']) ? (int) $decoded['remaining'] : count($decoded['queue']);
+        $decoded['total'] = isset($decoded['total']) ? max(0, (int) $decoded['total']) : count($decoded['queue']);
+        $decoded['done'] = isset($decoded['done']) ? max(0, (int) $decoded['done']) : 0;
+        $decoded['ok'] = isset($decoded['ok']) ? max(0, (int) $decoded['ok']) : 0;
+        $decoded['warn'] = isset($decoded['warn']) ? max(0, (int) $decoded['warn']) : 0;
+        $decoded['fail'] = isset($decoded['fail']) ? max(0, (int) $decoded['fail']) : 0;
+        $decoded['remaining'] = count($decoded['queue']);
+        if ($decoded['remaining'] === 0 && $decoded['total'] > $decoded['done']) {
+            $decoded['queue'] = $this->rebuildTestQueueFromProgress($decoded['done']);
+            $decoded['remaining'] = count($decoded['queue']);
+        }
         return $decoded;
+    }
+
+    private function rebuildTestQueueFromProgress(int $done): array
+    {
+        $services = $this->getScopedHostingServices($this->getEasyServicesCacheOnly(), false, false);
+        $all = [];
+        foreach ($services as $svc) {
+            $id = (int) ($svc['serviceid'] ?? 0);
+            if ($id > 0) {
+                $all[] = $id;
+            }
+        }
+        $all = array_values(array_unique($all));
+        if (empty($all)) {
+            return [];
+        }
+        if ($done <= 0) {
+            return $all;
+        }
+        if ($done >= count($all)) {
+            return [];
+        }
+        return array_slice($all, $done);
     }
 
     private function saveTestAllState(array $state): void

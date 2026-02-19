@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.74] - 2026-02-19
+### Fixed
+- Fixed stuck batch state in Servers tab where progress could remain (e.g. `1/163`) while `Stop/Reset` controls disappeared.
+- Running-state detection now uses both `remaining` and `done < total`.
+- Added queue self-recovery when legacy/corrupt state has progress counters but empty queue.
+
 ## [1.73] - 2026-02-19
 ### Fixed
 - Manual single-service test now retries `client/services/{id}/ports` without impersonation on HTTP `422` (in addition to `401/403`) before final failure.

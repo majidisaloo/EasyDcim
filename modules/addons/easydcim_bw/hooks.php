@@ -33,6 +33,9 @@ add_hook('AfterCronJob', 1, static function (): void {
     }
 
     $settings = new Settings($addonConfig);
+    if (!$settings->getBool('module_enabled', true)) {
+        return;
+    }
     $runner = new CronRunner($settings, new Logger());
 
     Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(

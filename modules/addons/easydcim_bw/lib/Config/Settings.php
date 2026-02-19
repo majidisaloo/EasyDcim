@@ -56,7 +56,9 @@ final class Settings
         return [
             'easydcim_base_url' => '',
             'easydcim_api_token' => '',
+            'module_enabled' => '1',
             'use_impersonation' => '0',
+            'ui_language' => 'auto',
             'managed_pids' => '',
             'managed_gids' => '',
             'poll_interval_minutes' => '15',
@@ -78,6 +80,12 @@ final class Settings
             'log_retention_days' => '30',
             'traffic_direction_map' => 'normal',
             'default_calculation_mode' => 'TOTAL',
+            'proxy_enabled' => '0',
+            'proxy_type' => 'http',
+            'proxy_host' => '',
+            'proxy_port' => '',
+            'proxy_username' => '',
+            'proxy_password' => '',
         ];
     }
 

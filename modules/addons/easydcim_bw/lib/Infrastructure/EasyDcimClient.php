@@ -12,13 +12,15 @@ final class EasyDcimClient
     private string $token;
     private bool $impersonation;
     private Logger $logger;
+    private array $proxy;
 
-    public function __construct(string $baseUrl, string $token, bool $impersonation, Logger $logger)
+    public function __construct(string $baseUrl, string $token, bool $impersonation, Logger $logger, array $proxy = [])
     {
         $this->baseUrl = rtrim($baseUrl, '/');
         $this->token = $token;
         $this->impersonation = $impersonation;
         $this->logger = $logger;
+        $this->proxy = $proxy;
     }
 
     public function bandwidth(string $serviceId, string $start, string $end, ?string $impersonateUser = null): array
@@ -107,6 +109,7 @@ final class EasyDcimClient
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        $this->applyProxyOptions($ch);
 
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_SLASHES));
@@ -141,5 +144,39 @@ final class EasyDcimClient
         }
 
         return $result;
+    }
+
+    private function applyProxyOptions($ch): void
+    {
+        if (!(($this->proxy['enabled'] ?? false) === true)) {
+            return;
+        }
+
+        $host = trim((string) ($this->proxy['host'] ?? ''));
+        $port = (int) ($this->proxy['port'] ?? 0);
+        if ($host === '' || $port <= 0) {
+            return;
+        }
+
+        curl_setopt($ch, CURLOPT_PROXY, $host);
+        curl_setopt($ch, CURLOPT_PROXYPORT, $port);
+
+        $type = strtolower((string) ($this->proxy['type'] ?? 'http'));
+        if ($type === 'socks5') {
+            curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
+        } elseif ($type === 'socks4') {
+            curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS4);
+        } else {
+            curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
+            if ($type === 'https') {
+                curl_setopt($ch, CURLOPT_HTTPPROXYTUNNEL, true);
+            }
+        }
+
+        $username = (string) ($this->proxy['username'] ?? '');
+        $password = (string) ($this->proxy['password'] ?? '');
+        if ($username !== '') {
+            curl_setopt($ch, CURLOPT_PROXYUSERPWD, $username . ':' . $password);
+        }
     }
 }

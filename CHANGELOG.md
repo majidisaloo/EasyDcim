@@ -2,6 +2,21 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.19] - 2026-02-19
+### Added
+- New dedicated `Connection` tab for EasyDCIM settings and connectivity tests.
+- Proxy support for EasyDCIM API requests (`HTTP`, `HTTPS`, `SOCKS4`, `SOCKS5`) with optional authentication.
+- Global module enable/disable switch for temporary pause without uninstalling.
+- UI language selection (`Default`, `English`, `Farsi`) for admin/client rendering.
+- Scope page now loads products from selected `GID/PID` and shows custom-field readiness checks (`service/order/server`).
+### Changed
+- `Suspended (other reasons)` now counts only services inside configured scope (`PID/GID`), not all WHMCS services.
+- Scope quota UI upgraded to per-product plan editor (`IN/OUT/TOTAL`, unlimited toggles, mode/action defaults).
+- EasyDCIM tests and runtime calls now use configured proxy settings when enabled.
+### Fixed
+- Eliminated practical dependency on `shell_exec` for update checks in shared hosting usage path.
+- Improved settings-save isolation per tab (general vs connection) to avoid unintended resets.
+
 ## [1.18] - 2026-02-19
 ### Added
 - New admin `Scope` tab for managed `PID/GID` and per-plan quota rules by mode (`IN`, `OUT`, `TOTAL`) with unlimited option.

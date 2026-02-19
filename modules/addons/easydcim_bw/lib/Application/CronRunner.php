@@ -30,6 +30,10 @@ final class CronRunner
 
     public function runPoll(): void
     {
+        if (!$this->settings->getBool('module_enabled', true)) {
+            return;
+        }
+
         $lock = new LockManager();
         if (!$lock->acquire('poll', 600)) {
             return;
@@ -67,6 +71,10 @@ final class CronRunner
 
     public function runUpdateCheck(string $moduleDir): void
     {
+        if (!$this->settings->getBool('module_enabled', true)) {
+            return;
+        }
+
         $lastCheck = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_update_check_at')->value('meta_value');
         $interval = max(5, $this->settings->getInt('update_check_interval_minutes', 30));
         if ($lastCheck && strtotime((string) $lastCheck) > time() - ($interval * 60)) {
@@ -276,7 +284,8 @@ final class CronRunner
             $this->settings->getString('easydcim_base_url'),
             Crypto::safeDecrypt($this->settings->getString('easydcim_api_token')),
             $this->settings->getBool('use_impersonation', false),
-            $this->logger
+            $this->logger,
+            $this->proxyConfig()
         );
     }
 
@@ -546,5 +555,17 @@ final class CronRunner
             ['meta_key' => 'api_fail_count'],
             ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
         );
+    }
+
+    private function proxyConfig(): array
+    {
+        return [
+            'enabled' => $this->settings->getBool('proxy_enabled', false),
+            'type' => $this->settings->getString('proxy_type', 'http'),
+            'host' => $this->settings->getString('proxy_host'),
+            'port' => $this->settings->getInt('proxy_port', 0),
+            'username' => $this->settings->getString('proxy_username'),
+            'password' => Crypto::safeDecrypt($this->settings->getString('proxy_password')),
+        ];
     }
 }

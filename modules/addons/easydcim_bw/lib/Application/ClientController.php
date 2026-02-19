@@ -23,7 +23,14 @@ final class ClientController
     {
         $this->settings = $settings;
         $this->logger = $logger;
-        $lang = strtolower((string) ($_SESSION['Language'] ?? $_SESSION['adminlang'] ?? 'english'));
+        $configured = strtolower($this->settings->getString('ui_language', 'auto'));
+        if (in_array($configured, ['fa', 'farsi', 'persian'], true)) {
+            $lang = 'farsi';
+        } elseif (in_array($configured, ['en', 'english'], true)) {
+            $lang = 'english';
+        } else {
+            $lang = strtolower((string) ($_SESSION['Language'] ?? $_SESSION['adminlang'] ?? 'english'));
+        }
         $this->isFa = str_starts_with($lang, 'farsi') || str_starts_with($lang, 'persian') || str_starts_with($lang, 'fa');
     }
 
@@ -48,7 +55,15 @@ final class ClientController
             $this->settings->getString('easydcim_base_url'),
             Crypto::safeDecrypt($this->settings->getString('easydcim_api_token')),
             $this->settings->getBool('use_impersonation', false),
-            $this->logger
+            $this->logger,
+            [
+                'enabled' => $this->settings->getBool('proxy_enabled', false),
+                'type' => $this->settings->getString('proxy_type', 'http'),
+                'host' => $this->settings->getString('proxy_host'),
+                'port' => $this->settings->getInt('proxy_port', 0),
+                'username' => $this->settings->getString('proxy_username'),
+                'password' => Crypto::safeDecrypt($this->settings->getString('proxy_password')),
+            ]
         );
 
         $cycle = new CycleCalculator();

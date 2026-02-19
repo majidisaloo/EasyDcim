@@ -25,7 +25,14 @@ final class AdminController
         $this->settings = $settings;
         $this->logger = $logger;
         $this->moduleDir = $moduleDir;
-        $lang = strtolower((string) ($_SESSION['adminlang'] ?? $_SESSION['Language'] ?? 'english'));
+        $configured = strtolower($this->settings->getString('ui_language', 'auto'));
+        if (in_array($configured, ['fa', 'farsi', 'persian'], true)) {
+            $lang = 'farsi';
+        } elseif (in_array($configured, ['en', 'english'], true)) {
+            $lang = 'english';
+        } else {
+            $lang = strtolower((string) ($_SESSION['adminlang'] ?? $_SESSION['Language'] ?? 'english'));
+        }
         $this->isFa = str_starts_with($lang, 'farsi') || str_starts_with($lang, 'persian') || str_starts_with($lang, 'fa');
     }
 
@@ -61,9 +68,13 @@ final class AdminController
             $flash[] = $this->saveSettings();
             $tab = 'settings';
         }
+        if ($action === 'save_connection') {
+            $flash[] = $this->saveSettings();
+            $tab = 'connection';
+        }
         if ($action === 'test_easydcim') {
             $flash[] = $this->testEasyDcimConnection();
-            $tab = 'settings';
+            $tab = 'connection';
         }
         if ($action === 'run_preflight') {
             $flash[] = ['type' => 'info', 'text' => 'Preflight retest completed.'];
@@ -93,6 +104,10 @@ final class AdminController
             $flash[] = $this->saveProductDefault();
             $tab = 'scope';
         }
+        if ($action === 'save_product_plan') {
+            $flash[] = $this->saveProductPlan();
+            $tab = 'scope';
+        }
 
         $this->settings = new Settings(Settings::loadFromDatabase());
         $version = Version::current($this->moduleDir);
@@ -113,6 +128,8 @@ final class AdminController
 
         if ($tab === 'settings') {
             $this->renderSettingsTab();
+        } elseif ($tab === 'connection') {
+            $this->renderConnectionTab();
         } elseif ($tab === 'scope') {
             $this->renderScopeTab();
         } elseif ($tab === 'packages') {
@@ -130,6 +147,7 @@ final class AdminController
     {
         $tabs = [
             'dashboard' => $this->t('tab_dashboard'),
+            'connection' => $this->t('tab_connection'),
             'settings' => $this->t('tab_settings'),
             'scope' => $this->t('tab_scope'),
             'packages' => $this->t('tab_packages'),
@@ -206,10 +224,8 @@ final class AdminController
         echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="tab" value="settings">';
         echo '<input type="hidden" name="action" value="save_settings">';
-
-        echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="60"></div>';
-        echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="60"></div>';
-        echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Module Enabled</label><input type="checkbox" name="module_enabled" value="1" ' . ($s->getBool('module_enabled', true) ? 'checked' : '') . '><span class="edbw-help">Disable temporarily without losing data.</span></div>';
+        echo '<div class="edbw-form-inline"><label>UI Language</label><select name="ui_language"><option value="auto"' . ($s->getString('ui_language', 'auto') === 'auto' ? ' selected' : '') . '>Default</option><option value="english"' . ($s->getString('ui_language', 'auto') === 'english' ? ' selected' : '') . '>English</option><option value="farsi"' . ($s->getString('ui_language', 'auto') === 'farsi' ? ' selected' : '') . '>فارسی</option></select></div>';
         echo '<div class="edbw-form-inline"><label>Poll Interval (min)</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
         echo '<div class="edbw-form-inline"><label>Graph Cache (min)</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
 
@@ -234,9 +250,32 @@ final class AdminController
 
         echo '<button class="btn btn-primary" type="submit">Save Settings</button>';
         echo '</form>';
+        echo '</div>';
+    }
+
+    private function renderConnectionTab(): void
+    {
+        $s = $this->settings;
+        echo '<div class="edbw-panel">';
+        echo '<h3>EasyDCIM Connection</h3>';
+        echo '<form method="post" class="edbw-settings-grid">';
+        echo '<input type="hidden" name="tab" value="connection">';
+        echo '<input type="hidden" name="action" value="save_connection">';
+        echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="70"></div>';
+        echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="70"></div>';
+        echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation', false) ? 'checked' : '') . '></div>';
+        echo '<h4>Proxy</h4>';
+        echo '<div class="edbw-form-inline"><label>Enable Proxy</label><input type="checkbox" name="proxy_enabled" value="1" ' . ($s->getBool('proxy_enabled', false) ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>Proxy Type</label><select name="proxy_type"><option value="http"' . ($s->getString('proxy_type', 'http') === 'http' ? ' selected' : '') . '>HTTP</option><option value="https"' . ($s->getString('proxy_type', 'http') === 'https' ? ' selected' : '') . '>HTTPS</option><option value="socks5"' . ($s->getString('proxy_type', 'http') === 'socks5' ? ' selected' : '') . '>SOCKS5</option><option value="socks4"' . ($s->getString('proxy_type', 'http') === 'socks4' ? ' selected' : '') . '>SOCKS4</option></select></div>';
+        echo '<div class="edbw-form-inline"><label>Proxy Host</label><input type="text" name="proxy_host" value="' . htmlspecialchars($s->getString('proxy_host')) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Proxy Port</label><input type="number" min="1" name="proxy_port" value="' . (int) $s->getInt('proxy_port', 0) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Proxy Username</label><input type="text" name="proxy_username" value="' . htmlspecialchars($s->getString('proxy_username')) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>Proxy Password</label><input type="password" name="proxy_password" value="" placeholder="Leave empty to keep current password"></div>';
+        echo '<button class="btn btn-primary" type="submit">Save Connection</button>';
+        echo '</form>';
 
         echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="tab" value="settings">';
+        echo '<input type="hidden" name="tab" value="connection">';
         echo '<input type="hidden" name="action" value="test_easydcim">';
         echo '<button class="btn btn-default" type="submit">Test EasyDCIM Connection</button>';
         echo '</form>';
@@ -303,6 +342,7 @@ final class AdminController
     private function renderScopeTab(): void
     {
         $s = $this->settings;
+        $scopedProducts = $this->getScopedProducts();
         echo '<div class="edbw-panel">';
         echo '<h3>Managed Scope</h3>';
         echo '<form method="post" class="edbw-settings-grid">';
@@ -312,35 +352,35 @@ final class AdminController
         echo '<div class="edbw-form-inline"><label>Managed GIDs</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="70"><span class="edbw-help">Comma separated group IDs</span></div>';
         echo '<button class="btn btn-primary" type="submit">Save Scope</button>';
         echo '</form>';
+        echo '<p class="edbw-help">Loaded products by current scope: ' . count($scopedProducts) . '</p>';
         echo '</div>';
 
         echo '<div class="edbw-panel">';
         echo '<h3>Plan Quotas (IN / OUT / TOTAL)</h3>';
-        echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="tab" value="scope">';
-        echo '<input type="hidden" name="action" value="save_product_default">';
-        echo '<input type="number" min="1" name="pd_pid" placeholder="PID" required>';
-        echo '<select name="pd_mode"><option value="IN">IN</option><option value="OUT">OUT</option><option value="TOTAL" selected>TOTAL</option></select>';
-        echo '<input type="number" step="0.01" min="0" name="pd_quota_gb" placeholder="Quota GB">';
-        echo '<label>Unlimited</label><input type="checkbox" name="pd_unlimited" value="1">';
-        echo '<select name="pd_action"><option value="disable_ports">Disable Ports</option><option value="suspend">Suspend</option><option value="both">Both</option></select>';
-        echo '<button class="btn btn-default" type="submit">Save Plan Rule</button>';
-        echo '</form>';
-
-        $rows = Capsule::table('mod_easydcim_bw_guard_product_defaults')->orderByDesc('id')->limit(500)->get();
         echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>Mode</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>Unlimited IN/OUT/TOTAL</th><th>Action</th><th>Enabled</th></tr></thead><tbody>';
-        foreach ($rows as $r) {
-            echo '<tr>';
-            echo '<td>' . (int) $r->pid . '</td>';
-            echo '<td>' . htmlspecialchars((string) $r->default_mode) . '</td>';
-            echo '<td>' . htmlspecialchars((string) ($r->default_quota_in_gb ?? '')) . '</td>';
-            echo '<td>' . htmlspecialchars((string) ($r->default_quota_out_gb ?? '')) . '</td>';
-            echo '<td>' . htmlspecialchars((string) ($r->default_quota_total_gb ?? $r->default_quota_gb ?? '')) . '</td>';
-            echo '<td>' . ((int) ($r->unlimited_in ?? 0)) . '/' . ((int) ($r->unlimited_out ?? 0)) . '/' . ((int) ($r->unlimited_total ?? 0)) . '</td>';
-            echo '<td>' . htmlspecialchars((string) $r->default_action) . '</td>';
-            echo '<td>' . ((int) $r->enabled === 1 ? 'Yes' : 'No') . '</td>';
-            echo '</tr>';
+        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>Product</th><th>GID</th><th>CF Check</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>Unlimited IN/OUT/TOTAL</th><th>Mode</th><th>Action</th><th>Save</th></tr></thead><tbody>';
+        foreach ($scopedProducts as $row) {
+            echo '<tr><form method="post">';
+            echo '<input type="hidden" name="tab" value="scope">';
+            echo '<input type="hidden" name="action" value="save_product_plan">';
+            echo '<input type="hidden" name="pd_pid" value="' . (int) $row['pid'] . '">';
+            echo '<td>' . (int) $row['pid'] . '</td>';
+            echo '<td>' . htmlspecialchars((string) $row['name']) . '</td>';
+            echo '<td>' . (int) $row['gid'] . '</td>';
+            $cfStatus = (($row['cf_service'] ? 'S' : '-') . '/' . ($row['cf_order'] ? 'O' : '-') . '/' . ($row['cf_server'] ? 'V' : '-'));
+            echo '<td>' . htmlspecialchars($cfStatus) . '</td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_in_gb" value="' . htmlspecialchars((string) $row['quota_in']) . '"></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_out_gb" value="' . htmlspecialchars((string) $row['quota_out']) . '"></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_total_gb" value="' . htmlspecialchars((string) $row['quota_total']) . '"></td>';
+            echo '<td>';
+            echo '<label>IN <input type="checkbox" name="pd_unlimited_in" value="1" ' . ($row['unlimited_in'] ? 'checked' : '') . '></label> ';
+            echo '<label>OUT <input type="checkbox" name="pd_unlimited_out" value="1" ' . ($row['unlimited_out'] ? 'checked' : '') . '></label> ';
+            echo '<label>TOTAL <input type="checkbox" name="pd_unlimited_total" value="1" ' . ($row['unlimited_total'] ? 'checked' : '') . '></label>';
+            echo '</td>';
+            echo '<td><select name="pd_mode"><option value="IN"' . ($row['mode'] === 'IN' ? ' selected' : '') . '>IN</option><option value="OUT"' . ($row['mode'] === 'OUT' ? ' selected' : '') . '>OUT</option><option value="TOTAL"' . ($row['mode'] === 'TOTAL' ? ' selected' : '') . '>TOTAL</option></select></td>';
+            echo '<td><select name="pd_action"><option value="disable_ports"' . ($row['action'] === 'disable_ports' ? ' selected' : '') . '>Disable Ports</option><option value="suspend"' . ($row['action'] === 'suspend' ? ' selected' : '') . '>Suspend</option><option value="both"' . ($row['action'] === 'both' ? ' selected' : '') . '>Both</option></select></td>';
+            echo '<td><button class="btn btn-default" type="submit">Save</button></td>';
+            echo '</form></tr>';
         }
         echo '</tbody></table>';
         echo '</div>';
@@ -446,6 +486,7 @@ final class AdminController
         $checks[] = ['name' => 'cURL extension', 'ok' => function_exists('curl_init'), 'detail' => function_exists('curl_init') ? 'Available' : 'Missing'];
         $checks[] = ['name' => 'Git mode capability (shell_exec)', 'ok' => true, 'detail' => 'Not required (release-based updater is active)'];
         $checks[] = ['name' => 'ZIP extension', 'ok' => class_exists(\ZipArchive::class), 'detail' => class_exists(\ZipArchive::class) ? 'Available' : 'Missing'];
+        $checks[] = ['name' => 'Module status', 'ok' => $this->settings->getBool('module_enabled', true), 'detail' => $this->settings->getBool('module_enabled', true) ? 'Enabled' : 'Disabled'];
 
         $baseUrl = $this->settings->getString('easydcim_base_url');
         $token = $this->settings->getString('easydcim_api_token');
@@ -476,18 +517,21 @@ final class AdminController
     {
         $limitedCount = (int) Capsule::table('mod_easydcim_bw_guard_service_state')->where('last_status', 'limited')->count();
         $syncedInLastHour = (int) Capsule::table('mod_easydcim_bw_guard_service_state')->where('last_check_at', '>=', date('Y-m-d H:i:s', time() - 3600))->count();
-        $suspendedOther = (int) Capsule::table('tblhosting as h')
+        $suspendedQuery = Capsule::table('tblhosting as h')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
             ->leftJoin('mod_easydcim_bw_guard_service_state as s', 's.serviceid', '=', 'h.id')
             ->where('h.domainstatus', 'Suspended')
             ->where(static function ($q): void {
                 $q->whereNull('s.last_status')->orWhere('s.last_status', '!=', 'limited');
-            })
-            ->count();
+            });
+        $this->applyScopeFilter($suspendedQuery);
+        $suspendedOther = (int) $suspendedQuery->count();
 
         $lastWhmcsCron = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_whmcs_cron_at')->value('meta_value');
         $cronOk = $lastWhmcsCron !== '' && strtotime($lastWhmcsCron) > time() - 360;
 
         return [
+            ['label' => 'Module status', 'value' => $this->settings->getBool('module_enabled', true) ? 'Enabled' : 'Disabled', 'state' => $this->settings->getBool('module_enabled', true) ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 2v10"></path><path d="M6 6a8 8 0 1012 0"></path></svg>'],
             ['label' => 'Cron status', 'value' => $cronOk ? ('Active (last ping: ' . $lastWhmcsCron . ')') : 'Not running in last 6 minutes', 'state' => $cronOk ? 'ok' : 'error', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>'],
             ['label' => 'Traffic-limited services', 'value' => (string) $limitedCount, 'state' => $limitedCount > 0 ? 'warn' : 'ok', 'icon' => '<svg viewBox="0 0 24 24"><path d="M4 20h16M7 16h10M10 12h4M12 4v4"></path></svg>'],
             ['label' => 'Synced (last 1h)', 'value' => (string) $syncedInLastHour, 'state' => $syncedInLastHour > 0 ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M3 12h6l3-8 4 16 3-8h2"></path></svg>'],
@@ -500,9 +544,21 @@ final class AdminController
     {
         $current = Settings::loadFromDatabase();
         $payload = $current;
-        $keys = array_keys(Settings::defaults());
-        $boolKeys = ['git_update_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode'];
-        foreach ($keys as $key) {
+        $action = (string) ($_POST['action'] ?? '');
+        $allowedGeneral = [
+            'module_enabled', 'ui_language', 'poll_interval_minutes', 'graph_cache_minutes',
+            'autobuy_enabled', 'autobuy_threshold_gb', 'autobuy_default_package_id', 'autobuy_max_per_cycle',
+            'update_mode', 'traffic_direction_map', 'default_calculation_mode', 'test_mode',
+            'log_retention_days', 'preflight_strict_mode', 'purge_on_deactivate',
+        ];
+        $allowedConnection = [
+            'easydcim_base_url', 'use_impersonation',
+            'proxy_enabled', 'proxy_type', 'proxy_host', 'proxy_port', 'proxy_username',
+        ];
+        $allowed = $action === 'save_connection' ? $allowedConnection : $allowedGeneral;
+        $boolKeys = ['module_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode', 'proxy_enabled'];
+
+        foreach ($allowed as $key) {
             if (in_array($key, $boolKeys, true)) {
                 $payload[$key] = isset($_POST[$key]) ? '1' : '0';
                 continue;
@@ -513,11 +569,20 @@ final class AdminController
             $payload[$key] = trim((string) $_POST[$key]);
         }
 
-        $newToken = trim((string) ($_POST['easydcim_api_token'] ?? ''));
-        if ($newToken !== '') {
-            $payload['easydcim_api_token'] = function_exists('encrypt') ? encrypt($newToken) : $newToken;
-        } else {
-            $payload['easydcim_api_token'] = $current['easydcim_api_token'] ?? '';
+        if ($action === 'save_connection') {
+            $newToken = trim((string) ($_POST['easydcim_api_token'] ?? ''));
+            if ($newToken !== '') {
+                $payload['easydcim_api_token'] = function_exists('encrypt') ? encrypt($newToken) : $newToken;
+            } else {
+                $payload['easydcim_api_token'] = $current['easydcim_api_token'] ?? '';
+            }
+
+            $newProxyPassword = trim((string) ($_POST['proxy_password'] ?? ''));
+            if ($newProxyPassword !== '') {
+                $payload['proxy_password'] = function_exists('encrypt') ? encrypt($newProxyPassword) : $newProxyPassword;
+            } else {
+                $payload['proxy_password'] = $current['proxy_password'] ?? '';
+            }
         }
 
         if ((int) ($payload['log_retention_days'] ?? 30) < 1) {
@@ -537,7 +602,7 @@ final class AdminController
                 return ['type' => 'warning', 'text' => 'Base URL or API token is missing.'];
             }
 
-            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger);
+            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
             if ($client->ping()) {
                 return ['type' => 'success', 'text' => 'EasyDCIM connection is OK.'];
             }
@@ -628,6 +693,52 @@ final class AdminController
             return ['type' => 'success', 'text' => 'Plan quota rule saved.'];
         } catch (\Throwable $e) {
             return ['type' => 'danger', 'text' => 'Failed to save plan rule: ' . $e->getMessage()];
+        }
+    }
+
+    private function saveProductPlan(): array
+    {
+        try {
+            $pid = (int) ($_POST['pd_pid'] ?? 0);
+            if ($pid <= 0) {
+                return ['type' => 'danger', 'text' => 'Invalid PID.'];
+            }
+
+            $mode = strtoupper(trim((string) ($_POST['pd_mode'] ?? 'TOTAL')));
+            if (!in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
+                $mode = 'TOTAL';
+            }
+            $action = trim((string) ($_POST['pd_action'] ?? 'disable_ports'));
+            if (!in_array($action, ['disable_ports', 'suspend', 'both'], true)) {
+                $action = 'disable_ports';
+            }
+
+            $data = [
+                'pid' => $pid,
+                'default_mode' => $mode,
+                'default_action' => $action,
+                'default_quota_in_gb' => ($_POST['pd_quota_in_gb'] ?? '') !== '' ? (float) $_POST['pd_quota_in_gb'] : null,
+                'default_quota_out_gb' => ($_POST['pd_quota_out_gb'] ?? '') !== '' ? (float) $_POST['pd_quota_out_gb'] : null,
+                'default_quota_total_gb' => ($_POST['pd_quota_total_gb'] ?? '') !== '' ? (float) $_POST['pd_quota_total_gb'] : null,
+                'default_quota_gb' => ($_POST['pd_quota_total_gb'] ?? '') !== '' ? (float) $_POST['pd_quota_total_gb'] : 0,
+                'unlimited_in' => isset($_POST['pd_unlimited_in']) ? 1 : 0,
+                'unlimited_out' => isset($_POST['pd_unlimited_out']) ? 1 : 0,
+                'unlimited_total' => isset($_POST['pd_unlimited_total']) ? 1 : 0,
+                'enabled' => 1,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'created_at' => date('Y-m-d H:i:s'),
+            ];
+
+            $row = Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('pid', $pid)->first();
+            if ($row) {
+                Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('id', (int) $row->id)->update($data);
+            } else {
+                Capsule::table('mod_easydcim_bw_guard_product_defaults')->insert($data);
+            }
+
+            return ['type' => 'success', 'text' => 'Product plan saved for PID ' . $pid];
+        } catch (\Throwable $e) {
+            return ['type' => 'danger', 'text' => 'Failed to save product plan: ' . $e->getMessage()];
         }
     }
 
@@ -927,11 +1038,93 @@ final class AdminController
         echo '<div class="alert alert-success">Override saved.</div>';
     }
 
+    private function applyScopeFilter($query): void
+    {
+        $pids = array_map('intval', $this->settings->getCsvList('managed_pids'));
+        $gids = array_map('intval', $this->settings->getCsvList('managed_gids'));
+        if (!empty($pids)) {
+            $query->whereIn('h.packageid', $pids);
+            return;
+        }
+        if (!empty($gids)) {
+            $query->whereIn('p.gid', $gids);
+        }
+    }
+
+    private function getScopedProducts(): array
+    {
+        $pids = array_map('intval', $this->settings->getCsvList('managed_pids'));
+        $gids = array_map('intval', $this->settings->getCsvList('managed_gids'));
+        if (empty($pids) && empty($gids)) {
+            return [];
+        }
+
+        $q = Capsule::table('tblproducts')->select(['id', 'name', 'gid']);
+        if (!empty($pids)) {
+            $q->whereIn('id', $pids);
+        } elseif (!empty($gids)) {
+            $q->whereIn('gid', $gids);
+        }
+        $products = $q->orderBy('gid')->orderBy('id')->get();
+        if ($products->isEmpty()) {
+            return [];
+        }
+
+        $pidList = $products->pluck('id')->map(static fn ($v): int => (int) $v)->all();
+        $defaults = Capsule::table('mod_easydcim_bw_guard_product_defaults')->whereIn('pid', $pidList)->get()->keyBy('pid');
+        $cfRows = Capsule::table('tblcustomfields')
+            ->where('type', 'product')
+            ->whereIn('relid', $pidList)
+            ->get(['relid', 'fieldname']);
+        $cfMap = [];
+        foreach ($cfRows as $r) {
+            $pid = (int) $r->relid;
+            $name = strtolower(trim(explode('|', (string) $r->fieldname)[0]));
+            $cfMap[$pid][$name] = true;
+        }
+
+        $out = [];
+        foreach ($products as $p) {
+            $pid = (int) $p->id;
+            $d = $defaults[$pid] ?? null;
+            $out[] = [
+                'pid' => $pid,
+                'name' => (string) $p->name,
+                'gid' => (int) $p->gid,
+                'quota_in' => $d ? (string) ($d->default_quota_in_gb ?? '') : '',
+                'quota_out' => $d ? (string) ($d->default_quota_out_gb ?? '') : '',
+                'quota_total' => $d ? (string) ($d->default_quota_total_gb ?? $d->default_quota_gb ?? '') : '',
+                'unlimited_in' => $d ? ((int) ($d->unlimited_in ?? 0) === 1) : false,
+                'unlimited_out' => $d ? ((int) ($d->unlimited_out ?? 0) === 1) : false,
+                'unlimited_total' => $d ? ((int) ($d->unlimited_total ?? 0) === 1) : false,
+                'mode' => $d ? (string) ($d->default_mode ?? 'TOTAL') : 'TOTAL',
+                'action' => $d ? (string) ($d->default_action ?? 'disable_ports') : 'disable_ports',
+                'cf_service' => !empty($cfMap[$pid]['easydcim_service_id']),
+                'cf_order' => !empty($cfMap[$pid]['easydcim_order_id']),
+                'cf_server' => !empty($cfMap[$pid]['easydcim_server_id']),
+            ];
+        }
+        return $out;
+    }
+
+    private function proxyConfig(): array
+    {
+        return [
+            'enabled' => $this->settings->getBool('proxy_enabled', false),
+            'type' => $this->settings->getString('proxy_type', 'http'),
+            'host' => $this->settings->getString('proxy_host'),
+            'port' => $this->settings->getInt('proxy_port', 0),
+            'username' => $this->settings->getString('proxy_username'),
+            'password' => Crypto::safeDecrypt($this->settings->getString('proxy_password')),
+        ];
+    }
+
     private function t(string $key): string
     {
         $fa = [
             'subtitle' => 'مرکز کنترل ترافیک سرویس‌های EasyDCIM',
             'tab_dashboard' => 'داشبورد',
+            'tab_connection' => 'اتصال',
             'tab_settings' => 'تنظیمات',
             'tab_scope' => 'اسکوپ',
             'tab_packages' => 'پکیج‌ها',
@@ -940,6 +1133,7 @@ final class AdminController
         $en = [
             'subtitle' => 'Bandwidth control center for EasyDCIM services',
             'tab_dashboard' => 'Dashboard',
+            'tab_connection' => 'Connection',
             'tab_settings' => 'Settings',
             'tab_scope' => 'Scope',
             'tab_packages' => 'Packages',

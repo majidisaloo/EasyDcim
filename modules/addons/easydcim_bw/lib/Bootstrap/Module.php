@@ -128,7 +128,15 @@ final class Module
                         $settings->getString('easydcim_base_url'),
                         Crypto::safeDecrypt($token),
                         $settings->getBool('use_impersonation', false),
-                        new Logger()
+                        new Logger(),
+                        [
+                            'enabled' => $settings->getBool('proxy_enabled', false),
+                            'type' => $settings->getString('proxy_type', 'http'),
+                            'host' => $settings->getString('proxy_host'),
+                            'port' => $settings->getInt('proxy_port', 0),
+                            'username' => $settings->getString('proxy_username'),
+                            'password' => Crypto::safeDecrypt($settings->getString('proxy_password')),
+                        ]
                     );
                     if (!$client->ping()) {
                         $errors[] = 'EasyDCIM token/base URL ping check failed';

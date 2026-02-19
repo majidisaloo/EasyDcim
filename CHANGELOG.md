@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.45] - 2026-02-19
+### Fixed
+- Test flow now builds `service_id` candidates from all available sources (`service CF`, `order cache`, `server cache`, `IP cache`, `order API`) and tries them in sequence.
+- Added cross-check correction for mismatched `order_id` and `service_id` during scoped service mapping; mismatch is auto-corrected to trusted cache map and logged.
+- For unresolved service cases, test now attempts `server_id` lookup as a fallback without hardcoded exceptions.
+- Added clearer message for environments where Server-ID ports endpoint is not supported (`HTTP 404`).
+### Changed
+- EasyDCIM cache merge logic now always contributes `admin/orders` records to improve order/service/server matching quality.
+
 ## [1.44] - 2026-02-19
 ### Fixed
 - Added persistent `order_id -> service_id` cache (including negative cache) to avoid repeated heavy resolution calls for unresolved orders like `342`.

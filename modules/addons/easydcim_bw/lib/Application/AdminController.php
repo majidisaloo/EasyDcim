@@ -1238,47 +1238,90 @@ final class AdminController
                 return ['type' => 'warning', 'text' => $this->t('service_not_found_scope')];
             }
 
-            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+            $useImpersonation = $this->settings->getBool('use_impersonation', false);
+            $client = new EasyDcimClient($baseUrl, $token, $useImpersonation, $this->logger, $this->proxyConfig());
             $email = (string) ($target['email'] ?? '');
             $response = ['http_code' => 0, 'error' => ''];
             $mode = 'none';
-            $resolvedServiceId = (string) ($target['easydcim_service_id'] ?? '');
-            if ($resolvedServiceId === '' && (string) ($target['easydcim_order_id'] ?? '') !== '') {
-                $resolvedServiceId = $this->resolveServiceIdFromOrder($client, (string) $target['easydcim_order_id']);
+
+            $serviceCandidates = [];
+            $addCandidate = static function (array &$list, string $serviceId, string $source): void {
+                $serviceId = trim($serviceId);
+                if ($serviceId === '') {
+                    return;
+                }
+                foreach ($list as $row) {
+                    if ((string) ($row['id'] ?? '') === $serviceId) {
+                        return;
+                    }
+                }
+                $list[] = ['id' => $serviceId, 'source' => $source];
+            };
+            $addCandidate($serviceCandidates, (string) ($target['easydcim_service_id'] ?? ''), 'service_cf');
+            $orderId = trim((string) ($target['easydcim_order_id'] ?? ''));
+            $serverId = trim((string) ($target['easydcim_server_id'] ?? ''));
+            $ip = trim((string) ($target['ip'] ?? ''));
+            foreach ($this->getEasyServicesCacheOnly() as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $itemService = trim((string) ($item['service_id'] ?? ''));
+                if ($itemService === '') {
+                    continue;
+                }
+                if ($orderId !== '' && trim((string) ($item['order_id'] ?? '')) === $orderId) {
+                    $addCandidate($serviceCandidates, $itemService, 'order_cache');
+                }
+                if ($serverId !== '' && trim((string) ($item['server_id'] ?? '')) === $serverId) {
+                    $addCandidate($serviceCandidates, $itemService, 'server_cache');
+                }
+                if ($ip !== '' && trim((string) ($item['ip'] ?? '')) === $ip) {
+                    $addCandidate($serviceCandidates, $itemService, 'ip_cache');
+                }
+            }
+            if ($orderId !== '') {
+                $addCandidate($serviceCandidates, $this->resolveServiceIdFromOrder($client, $orderId), 'order_api');
             }
 
-            if ($resolvedServiceId !== '') {
-                $mode = 'service_id';
-                $response = $client->ports($resolvedServiceId, true, $email, false);
-                $codeFirst = (int) ($response['http_code'] ?? 0);
-                if (($codeFirst === 401 || $codeFirst === 403) && $this->settings->getBool('use_impersonation', false)) {
-                    $fallbackClient = new EasyDcimClient(
-                        $baseUrl,
-                        $token,
-                        false,
-                        $this->logger,
-                        $this->proxyConfig()
-                    );
-                    $fallbackResp = $fallbackClient->ports($resolvedServiceId, true, null, false);
-                    $codeFallback = (int) ($fallbackResp['http_code'] ?? 0);
-                    if ($codeFallback >= 200 && $codeFallback < 300) {
+            foreach ($serviceCandidates as $candidate) {
+                $candidateId = (string) ($candidate['id'] ?? '');
+                $candidateSource = (string) ($candidate['source'] ?? 'candidate');
+                $candidateResp = $client->ports($candidateId, true, $email, false);
+                $candidateCode = (int) ($candidateResp['http_code'] ?? 0);
+                if ($candidateCode >= 200 && $candidateCode < 300) {
+                    $response = $candidateResp;
+                    $mode = 'service_id:' . $candidateSource;
+                    break;
+                }
+                if (($candidateCode === 401 || $candidateCode === 403) && $useImpersonation) {
+                    $fallbackClient = new EasyDcimClient($baseUrl, $token, false, $this->logger, $this->proxyConfig());
+                    $fallbackResp = $fallbackClient->ports($candidateId, true, null, false);
+                    $fallbackCode = (int) ($fallbackResp['http_code'] ?? 0);
+                    if ($fallbackCode >= 200 && $fallbackCode < 300) {
                         $response = $fallbackResp;
-                        $mode = 'service_id_fallback_no_impersonation';
+                        $mode = 'service_id:' . $candidateSource . ':no_impersonation';
+                        break;
+                    }
+                    if ($fallbackCode !== 0) {
+                        $candidateResp = $fallbackResp;
+                        $candidateCode = $fallbackCode;
                     }
                 }
-                $codeAfterService = (int) ($response['http_code'] ?? 0);
-                $resolvedServerId = trim((string) ($target['easydcim_server_id'] ?? ''));
-                if (($codeAfterService === 401 || $codeAfterService === 403 || $codeAfterService === 422) && $resolvedServerId !== '') {
-                    $serverResp = $client->portsByServer($resolvedServerId, true, $email);
-                    $codeServer = (int) ($serverResp['http_code'] ?? 0);
-                    if ($codeServer >= 200 && $codeServer < 300) {
-                        $response = $serverResp;
-                        $mode = 'server_id_ports';
-                    }
+                if ((int) ($response['http_code'] ?? 0) === 0 || $candidateCode > (int) ($response['http_code'] ?? 0)) {
+                    $response = $candidateResp;
                 }
-            } elseif (trim((string) ($target['easydcim_server_id'] ?? '')) !== '') {
-                $mode = 'server_id_only';
-                $response = $client->portsByServer(trim((string) $target['easydcim_server_id']), true, $email);
+            }
+
+            if ($mode === 'none' && $serverId !== '') {
+                $serverResp = $client->portsByServer($serverId, true, $email);
+                $serverCode = (int) ($serverResp['http_code'] ?? 0);
+                if ($serverCode >= 200 && $serverCode < 300) {
+                    $response = $serverResp;
+                    $mode = 'server_id';
+                } elseif ((int) ($response['http_code'] ?? 0) === 0) {
+                    $response = $serverResp;
+                    $mode = 'server_id_only';
+                }
             }
             $code = (int) ($response['http_code'] ?? 0);
             $err = trim((string) ($response['error'] ?? ''));
@@ -1306,6 +1349,8 @@ final class AdminController
             if (($mode === 'none' || $mode === 'server_id_only') && $err === '') {
                 $err = $this->isFa ? 'Service ID از روی Order ID پیدا نشد' : 'Service ID was not resolved from order';
                 $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $err . ')';
+            } elseif ($mode === 'server_id_only' && $code === 404 && $err === 'No server port endpoint matched') {
+                $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $this->t('server_ports_not_supported') . ')';
             } elseif (($code === 401 || $code === 403) && $err === '') {
                 $err = $this->isFa ? 'عدم دسترسی به endpoint پورت‌ها با توکن/حالت فعلی' : 'Access denied for ports endpoint with current token/mode';
                 $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $err . ')';
@@ -1949,6 +1994,20 @@ final class AdminController
                     $resolvedServer = (string) ($easyByOrder[$resolvedOrder]['server_id'] ?? '');
                 }
             }
+            if ($resolvedOrder !== '' && isset($easyByOrder[$resolvedOrder])) {
+                $mappedService = trim((string) ($easyByOrder[$resolvedOrder]['service_id'] ?? ''));
+                if ($mappedService !== '') {
+                    if ($resolvedService !== '' && $resolvedService !== $mappedService) {
+                        $this->logger->log('WARNING', 'service_order_mismatch_corrected', [
+                            'serviceid' => $sid,
+                            'order_id' => $resolvedOrder,
+                            'from_service_id' => $resolvedService,
+                            'to_service_id' => $mappedService,
+                        ]);
+                    }
+                    $resolvedService = $mappedService;
+                }
+            }
             if ($resolveFromApi && $resolvedService === '' && $resolvedOrder !== '' && $resolverClient instanceof EasyDcimClient) {
                 if (array_key_exists($resolvedOrder, $resolvedFromOrder)) {
                     $resolvedService = (string) $resolvedFromOrder[$resolvedOrder];
@@ -1959,6 +2018,9 @@ final class AdminController
             }
             if ($resolvedService !== '' && isset($easyByService[$resolvedService]) && $resolvedServer === '') {
                 $resolvedServer = (string) ($easyByService[$resolvedService]['server_id'] ?? '');
+            }
+            if ($resolvedService !== '' && isset($easyByService[$resolvedService]) && $resolvedOrder === '') {
+                $resolvedOrder = (string) ($easyByService[$resolvedService]['order_id'] ?? '');
             }
             if ($resolvedService === '' && $resolvedServer !== '' && isset($easyByServer[$resolvedServer])) {
                 $resolvedService = (string) ($easyByServer[$resolvedServer]['service_id'] ?? '');
@@ -2538,6 +2600,7 @@ final class AdminController
             'network_ports_not_found' => 'پورت شبکه‌ای پیدا نشد',
             'ports_not_found' => 'پورتی پیدا نشد',
             'ports_error' => 'خطا در بررسی پورت',
+            'server_ports_not_supported' => 'endpoint پورت با Server ID در EasyDCIM شما پشتیبانی نمی‌شود',
             'status' => 'وضعیت',
             'no_rows' => 'موردی یافت نشد',
             'order_id' => 'Order ID',
@@ -2725,6 +2788,7 @@ final class AdminController
             'network_ports_not_found' => 'No network ports detected',
             'ports_not_found' => 'No ports found',
             'ports_error' => 'Port lookup failed',
+            'server_ports_not_supported' => 'Server-ID ports endpoint is not supported in your EasyDCIM',
             'status' => 'Status',
             'no_rows' => 'No rows found',
             'order_id' => 'Order ID',

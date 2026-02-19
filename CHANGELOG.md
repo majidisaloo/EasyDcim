@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.49] - 2026-02-19
+### Added
+- Added cross-system client identity comparison (WHMCS vs EasyDCIM) in `Important Warnings`.
+- Sync/cache parsing now extracts EasyDCIM client `name/email` from both `client/services` and `admin/orders` payloads (including nested client/user/customer objects).
+### Changed
+- Scoped mapped service rows now carry resolved EasyDCIM client identity for mismatch detection.
+
 ## [1.48] - 2026-02-19
 ### Added
 - Added `Test All` action in Servers tab to run row test for all scoped services in one click and summarize `OK/WARN/FAIL`.

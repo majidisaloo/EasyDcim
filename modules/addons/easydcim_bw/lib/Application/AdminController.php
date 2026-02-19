@@ -666,6 +666,7 @@ final class AdminController
                     if (!is_array($row)) {
                         continue;
                     }
+                    $identity = $this->extractEasyClientIdentity($row);
                     $serviceId = trim((string) ($row['service_id'] ?? $row['serviceId'] ?? ''));
                     if ($serviceId === '' && isset($row['service']) && is_array($row['service'])) {
                         $serviceId = trim((string) ($row['service']['id'] ?? $row['service']['service_id'] ?? ''));
@@ -684,6 +685,8 @@ final class AdminController
                         'order_id' => trim((string) ($row['id'] ?? $row['order_id'] ?? $row['orderId'] ?? '')),
                         'ip' => $ip,
                         'status' => (string) ($row['status'] ?? ''),
+                        'client_name' => $identity['name'],
+                        'client_email' => $identity['email'],
                         'is_up' => false,
                     ];
                 }
@@ -879,6 +882,36 @@ final class AdminController
             $warnings[] = [
                 'type' => $this->t('warn_service_issues'),
                 'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink . ' | ' . implode(' ، ', array_map('htmlspecialchars', $issues)),
+            ];
+        }
+
+        foreach ($activeRows as $r) {
+            $easyEmail = $this->normalizeEmail((string) ($r['easydcim_client_email'] ?? ''));
+            $easyName = $this->normalizeName((string) ($r['easydcim_client_name'] ?? ''));
+            if ($easyEmail === '' && $easyName === '') {
+                continue;
+            }
+
+            $whmcsEmail = $this->normalizeEmail((string) ($r['email'] ?? ''));
+            $whmcsName = $this->normalizeName((string) ($r['client_name'] ?? ''));
+            $emailMismatch = ($easyEmail !== '' && $whmcsEmail !== '' && $easyEmail !== $whmcsEmail);
+            $nameMismatch = ($easyName !== '' && $whmcsName !== '' && $easyName !== $whmcsName);
+            if (!$emailMismatch && !$nameMismatch) {
+                continue;
+            }
+
+            $serviceLink = '<a href="' . htmlspecialchars((string) $r['service_url']) . '">#' . (int) $r['serviceid'] . '</a>';
+            $clientLink = '<a href="' . htmlspecialchars((string) $r['client_url']) . '">' . htmlspecialchars((string) $r['client_name']) . '</a>';
+            $parts = [];
+            if ($emailMismatch) {
+                $parts[] = ($this->isFa ? 'ایمیل' : 'Email') . ' WHMCS=' . htmlspecialchars((string) ($r['email'] ?? '-')) . ' / EasyDCIM=' . htmlspecialchars((string) ($r['easydcim_client_email'] ?? '-'));
+            }
+            if ($nameMismatch) {
+                $parts[] = ($this->isFa ? 'نام' : 'Name') . ' WHMCS=' . htmlspecialchars((string) ($r['client_name'] ?? '-')) . ' / EasyDCIM=' . htmlspecialchars((string) ($r['easydcim_client_name'] ?? '-'));
+            }
+            $warnings[] = [
+                'type' => $this->t('warn_client_mismatch'),
+                'text' => $this->t('service') . ' ' . $serviceLink . ' | ' . $this->t('client') . ': ' . $clientLink . ' | ' . implode(' | ', $parts),
             ];
         }
 
@@ -2013,6 +2046,32 @@ final class AdminController
                 $easyByOrder[$ord] = $item;
             }
         }
+        $easyClientByService = [];
+        $easyClientByOrder = [];
+        $easyClientByServer = [];
+        foreach ($easyServiceItems as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $clientName = trim((string) ($item['client_name'] ?? ''));
+            $clientEmail = trim((string) ($item['client_email'] ?? ''));
+            if ($clientName === '' && $clientEmail === '') {
+                continue;
+            }
+            $identity = ['name' => $clientName, 'email' => $clientEmail];
+            $sid = trim((string) ($item['service_id'] ?? ''));
+            $srv = trim((string) ($item['server_id'] ?? ''));
+            $ord = trim((string) ($item['order_id'] ?? ''));
+            if ($sid !== '' && !isset($easyClientByService[$sid])) {
+                $easyClientByService[$sid] = $identity;
+            }
+            if ($ord !== '' && !isset($easyClientByOrder[$ord])) {
+                $easyClientByOrder[$ord] = $identity;
+            }
+            if ($srv !== '' && !isset($easyClientByServer[$srv])) {
+                $easyClientByServer[$srv] = $identity;
+            }
+        }
         $resolvedFromOrder = [];
 
         $out = [];
@@ -2078,6 +2137,21 @@ final class AdminController
                     $resolvedOrder = (string) ($easyByIp[$serviceIp]['order_id'] ?? '');
                 }
             }
+            $easyClientName = '';
+            $easyClientEmail = '';
+            if ($resolvedService !== '' && isset($easyClientByService[$resolvedService])) {
+                $easyClientName = (string) ($easyClientByService[$resolvedService]['name'] ?? '');
+                $easyClientEmail = (string) ($easyClientByService[$resolvedService]['email'] ?? '');
+            } elseif ($resolvedOrder !== '' && isset($easyClientByOrder[$resolvedOrder])) {
+                $easyClientName = (string) ($easyClientByOrder[$resolvedOrder]['name'] ?? '');
+                $easyClientEmail = (string) ($easyClientByOrder[$resolvedOrder]['email'] ?? '');
+            } elseif ($resolvedServer !== '' && isset($easyClientByServer[$resolvedServer])) {
+                $easyClientName = (string) ($easyClientByServer[$resolvedServer]['name'] ?? '');
+                $easyClientEmail = (string) ($easyClientByServer[$resolvedServer]['email'] ?? '');
+            } elseif ($serviceIp !== '' && isset($easyByIp[$serviceIp])) {
+                $easyClientName = trim((string) ($easyByIp[$serviceIp]['client_name'] ?? ''));
+                $easyClientEmail = trim((string) ($easyByIp[$serviceIp]['client_email'] ?? ''));
+            }
             $portsSummary = $this->t('no_data');
             $networkPortsTotal = 0;
             $networkPortsUp = 0;
@@ -2137,9 +2211,11 @@ final class AdminController
             'firstname' => (string) ($r->firstname ?? ''),
             'lastname' => (string) ($r->lastname ?? ''),
             'email' => (string) ($r->email ?? ''),
-            'client_name' => trim((string) ($r->firstname ?? '') . ' ' . (string) ($r->lastname ?? '')) ?: ('#' . (int) $r->userid),
+                'client_name' => trim((string) ($r->firstname ?? '') . ' ' . (string) ($r->lastname ?? '')) ?: ('#' . (int) $r->userid),
                 'client_url' => 'clientssummary.php?userid=' . (int) $r->userid,
                 'service_url' => 'clientsservices.php?userid=' . (int) $r->userid . '&id=' . $sid,
+                'easydcim_client_name' => $easyClientName,
+                'easydcim_client_email' => $easyClientEmail,
                 'ip' => (string) ($r->dedicatedip ?? ''),
                 'easydcim_order_id' => $resolvedOrder,
                 'easydcim_service_id' => $resolvedService,
@@ -2170,6 +2246,18 @@ final class AdminController
             return 'easydcim_server_id';
         }
         return $compact;
+    }
+
+    private function normalizeEmail(string $value): string
+    {
+        return strtolower(trim($value));
+    }
+
+    private function normalizeName(string $value): string
+    {
+        $v = strtolower(trim($value));
+        $v = preg_replace('/\s+/', ' ', $v) ?? $v;
+        return $v;
     }
 
     private function refreshServersCacheNow(): array
@@ -2392,6 +2480,7 @@ final class AdminController
             if (!is_array($row)) {
                 continue;
             }
+            $identity = $this->extractEasyClientIdentity($row);
             $related = isset($row['related']) && is_array($row['related']) ? $row['related'] : [];
             $relatedId = (string) ($row['related_id'] ?? $row['server_id'] ?? $row['device_id'] ?? $row['item_id'] ?? '');
             $ip = (string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? '');
@@ -2428,10 +2517,81 @@ final class AdminController
                 'order_id' => (string) ($row['order_id'] ?? $row['orderId'] ?? (($row['order']['id'] ?? $row['order']['order_id'] ?? ''))),
                 'ip' => $ip,
                 'status' => (string) ($row['status'] ?? $row['state'] ?? ''),
+                'client_name' => $identity['name'],
+                'client_email' => $identity['email'],
                 'is_up' => $isUp,
             ];
         }
         return $normalized;
+    }
+
+    private function extractEasyClientIdentity(array $row): array
+    {
+        $name = '';
+        $email = '';
+
+        $emailKeys = ['email', 'client_email', 'user_email', 'customer_email'];
+        foreach ($emailKeys as $k) {
+            $v = trim((string) ($row[$k] ?? ''));
+            if ($v !== '') {
+                $email = $v;
+                break;
+            }
+        }
+        if ($email === '') {
+            foreach (['client', 'user', 'customer', 'owner', 'account'] as $node) {
+                if (!isset($row[$node]) || !is_array($row[$node])) {
+                    continue;
+                }
+                foreach ($emailKeys as $k) {
+                    $v = trim((string) ($row[$node][$k] ?? ''));
+                    if ($v !== '') {
+                        $email = $v;
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        $directName = trim((string) ($row['name'] ?? ''));
+        if ($directName !== '') {
+            $name = $directName;
+        }
+        if ($name === '') {
+            $full = trim((string) ($row['fullname'] ?? $row['full_name'] ?? ''));
+            if ($full !== '') {
+                $name = $full;
+            }
+        }
+        if ($name === '') {
+            $first = trim((string) ($row['firstname'] ?? $row['first_name'] ?? ''));
+            $last = trim((string) ($row['lastname'] ?? $row['last_name'] ?? ''));
+            $joined = trim($first . ' ' . $last);
+            if ($joined !== '') {
+                $name = $joined;
+            }
+        }
+        if ($name === '') {
+            foreach (['client', 'user', 'customer', 'owner', 'account'] as $node) {
+                if (!isset($row[$node]) || !is_array($row[$node])) {
+                    continue;
+                }
+                $nested = trim((string) ($row[$node]['name'] ?? $row[$node]['fullname'] ?? $row[$node]['full_name'] ?? ''));
+                if ($nested !== '') {
+                    $name = $nested;
+                    break;
+                }
+                $first = trim((string) ($row[$node]['firstname'] ?? $row[$node]['first_name'] ?? ''));
+                $last = trim((string) ($row[$node]['lastname'] ?? $row[$node]['last_name'] ?? ''));
+                $joined = trim($first . ' ' . $last);
+                if ($joined !== '') {
+                    $name = $joined;
+                    break;
+                }
+            }
+        }
+
+        return ['name' => $name, 'email' => $email];
     }
 
     private function extractListFromObject(array $obj): array
@@ -2840,6 +3000,7 @@ final class AdminController
             'warning_type' => 'نوع هشدار',
             'warn_shared_server' => 'سرور مشترک بین سرویس‌های فعال',
             'warn_service_issues' => 'هشدار سرویس فعال',
+            'warn_client_mismatch' => 'اختلاف اطلاعات مشتری بین WHMCS و EasyDCIM',
             'warn_active_port_down' => 'سرویس فعال با پورت شبکه غیرفعال',
             'warn_active_no_traffic' => 'سرویس فعال بدون ترافیک شبکه',
             'm_version' => 'نسخه',
@@ -3033,6 +3194,7 @@ final class AdminController
             'warning_type' => 'Warning Type',
             'warn_shared_server' => 'Shared server among active services',
             'warn_service_issues' => 'Active service warning',
+            'warn_client_mismatch' => 'Client identity mismatch (WHMCS vs EasyDCIM)',
             'warn_active_port_down' => 'Active service with network port down',
             'warn_active_no_traffic' => 'Active service with no network traffic',
             'm_version' => 'Version',

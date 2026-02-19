@@ -226,7 +226,7 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('update_actions')) . '</h3>';
-        echo '<div class="edbw-actions edbw-actions-col">';
+        echo '<div class="edbw-actions">';
         echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="check_release_update"><button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('check_update_now')) . '</button></form>';
         echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="apply_release_update"><button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('apply_latest_release')) . '</button></form>';
         echo '</div>';

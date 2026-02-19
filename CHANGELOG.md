@@ -2,6 +2,10 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.56] - 2026-02-19
+### Fixed
+- Dashboard `Update Actions` buttons now render side-by-side again (horizontal layout), instead of stacked vertically.
+
 ## [1.55] - 2026-02-19
 ### Changed
 - Logs tab action buttons (`Cleanup Logs Now`, `Delete All Logs`) are now grouped in one horizontal card-style row for cleaner UI.

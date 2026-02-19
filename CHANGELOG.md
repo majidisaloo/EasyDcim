@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.78] - 2026-02-19
+### Fixed
+- Enforced deterministic downgrade to `order_details_only` when ports endpoint returns `401/403/422` but `admin/orders/{id}` is reachable.
+- `portsFromOrderDetails()` now returns explicit `reachable` state to prevent false `mode=none` failures on valid order mappings.
+
 ## [1.77] - 2026-02-19
 ### Fixed
 - Manual/Batch service test now downgrades to `order_details_only` when:

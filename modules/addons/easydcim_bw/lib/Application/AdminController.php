@@ -1759,8 +1759,10 @@ final class AdminController
             $code = (int) ($response['http_code'] ?? 0);
             $err = trim((string) ($response['error'] ?? ''));
             $orderIdForFallback = $orderId;
+            $orderDetailsReachable = false;
             if (($code === 401 || $code === 403 || $code === 404 || $code === 422 || $code === 0) && $orderIdForFallback !== '') {
                 $orderPortFallback = $this->portsFromOrderDetails($client, $orderIdForFallback);
+                $orderDetailsReachable = !empty($orderPortFallback['reachable']);
                 if (!empty($orderPortFallback['ok'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => $orderPortFallback['items']], 'error' => ''];
                     $code = 200;
@@ -1768,12 +1770,9 @@ final class AdminController
                     $mode = 'order_details_ports';
                 }
             }
-            if (($code === 401 || $code === 403 || $code === 422) && $orderIdForFallback !== '' && $mode === 'none') {
+            if (($code === 401 || $code === 403 || $code === 422) && $orderIdForFallback !== '' && $mode === 'none' && $orderDetailsReachable) {
                 // If order is reachable in admin API but client ports endpoint is restricted/inactive, do not hard-fail.
                 $prevCode = $code;
-                $orderCheck = $client->orderDetails($orderIdForFallback);
-                $orderCode = (int) ($orderCheck['http_code'] ?? 0);
-                if ($orderCode >= 200 && $orderCode < 300) {
                     $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
                     $code = 200;
                     $err = '';
@@ -1783,7 +1782,6 @@ final class AdminController
                         'order_id' => $orderIdForFallback,
                         'prev_http_code' => $prevCode,
                     ]);
-                }
             }
             $ok = $code >= 200 && $code < 300;
             $statusType = 'warning';
@@ -3313,18 +3311,20 @@ final class AdminController
         try {
             $details = $client->orderDetails($orderId);
             $data = (array) ($details['data'] ?? []);
+            $httpCode = (int) ($details['http_code'] ?? 0);
+            $reachable = $httpCode >= 200 && $httpCode < 300;
             $items = $this->extractPortsRecursive($data);
             if (!empty($items)) {
                 $this->logger->log('INFO', 'resolved_ports_from_order', [
                     'order_id' => $orderId,
                     'count' => count($items),
-                    'http_code' => (int) ($details['http_code'] ?? 0),
+                    'http_code' => $httpCode,
                 ]);
-                return ['ok' => true, 'items' => $items];
+                return ['ok' => true, 'reachable' => $reachable, 'items' => $items];
             }
             $this->logger->log('INFO', 'resolved_ports_from_order_empty', [
                 'order_id' => $orderId,
-                'http_code' => (int) ($details['http_code'] ?? 0),
+                'http_code' => $httpCode,
                 'top_keys' => array_slice(array_values(array_map(static fn ($k): string => (string) $k, array_keys($data))), 0, 25),
             ]);
         } catch (\Throwable $e) {
@@ -3333,7 +3333,7 @@ final class AdminController
                 'error' => $e->getMessage(),
             ]);
         }
-        return ['ok' => false, 'items' => []];
+        return ['ok' => false, 'reachable' => false, 'items' => []];
     }
 
     private function extractPortsRecursive($value, string $parentKey = ''): array

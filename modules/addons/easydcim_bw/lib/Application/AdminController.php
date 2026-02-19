@@ -468,10 +468,17 @@ final class AdminController
             $serverId = trim((string) ($item['server_id'] ?? ''));
             $ip = trim((string) ($item['ip'] ?? ''));
             $orderId = trim((string) ($item['order_id'] ?? ''));
+            $status = strtolower(trim((string) ($item['status'] ?? '')));
             if ($serviceId === '' && $serverId === '' && $ip === '' && $orderId === '') {
                 return false;
             }
             if ($serviceId !== '' && isset($mappedServiceIds[$serviceId])) {
+                return false;
+            }
+            if ($serverId === '' && $ip === '') {
+                return false;
+            }
+            if (in_array($status, ['pending', 'rejected', 'cancelled', 'canceled', 'fraud'], true)) {
                 return false;
             }
             return true;
@@ -498,7 +505,7 @@ final class AdminController
             echo '</form>';
             $testAllState = $this->getTestAllState();
             if (($testAllState['remaining'] ?? 0) > 0) {
-                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<form method="post" id="edbw-test-all-continue-form" class="edbw-form-inline edbw-action-card">';
                 echo '<input type="hidden" name="tab" value="servers">';
                 echo '<input type="hidden" name="action" value="test_all_services">';
                 echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
@@ -513,6 +520,7 @@ final class AdminController
                     . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
                     . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
                     . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')</div>';
+                echo '<script>(function(){var f=document.getElementById("edbw-test-all-continue-form");if(!f){return;}setTimeout(function(){try{f.submit();}catch(e){}},900);})();</script>';
             }
             echo '</div>';
             if (count($easyServices) === 0 && $cacheAt === '') {
@@ -1315,6 +1323,7 @@ final class AdminController
     {
         try {
             $serviceId = (int) ($_POST['test_serviceid'] ?? 0);
+            $bulkMode = (string) ($_POST['__bulk_test'] ?? '0') === '1';
             if ($serviceId <= 0) {
                 return ['type' => 'danger', 'text' => $this->t('invalid_service')];
             }
@@ -1360,7 +1369,7 @@ final class AdminController
             $orderId = trim((string) ($target['easydcim_order_id'] ?? ''));
             $serverId = trim((string) ($target['easydcim_server_id'] ?? ''));
             $ip = trim((string) ($target['ip'] ?? ''));
-            if ($orderId === '' && $serverId !== '') {
+            if (!$bulkMode && $orderId === '' && $serverId !== '') {
                 $orderId = $this->resolveOrderIdFromServer($client, $serverId, $ip);
             }
             foreach ($this->getEasyServicesCacheOnly() as $item) {
@@ -1381,8 +1390,8 @@ final class AdminController
                     $addCandidate($serviceCandidates, $itemService, 'ip_cache');
                 }
             }
-            if ($orderId !== '') {
-                $addCandidate($serviceCandidates, $this->resolveServiceIdFromOrder($client, $orderId), 'order_api');
+            if ($orderId !== '' && !$bulkMode) {
+                $addCandidate($serviceCandidates, $this->resolveServiceIdFromOrder($client, $orderId, false), 'order_api');
             }
 
             // Prefer order-details when server/order mapping exists (more stable in restricted client endpoints).
@@ -1391,6 +1400,14 @@ final class AdminController
                 if (!empty($orderPortPrimary['ok'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => $orderPortPrimary['items']], 'error' => ''];
                     $mode = 'order_details_ports:server_order';
+                }
+            }
+
+            if ($bulkMode && $mode === 'none' && $orderId !== '') {
+                $orderPortPrimary = $this->portsFromOrderDetails($client, $orderId);
+                if (!empty($orderPortPrimary['ok'])) {
+                    $response = ['http_code' => 200, 'data' => ['ports' => $orderPortPrimary['items']], 'error' => ''];
+                    $mode = 'order_details_ports:bulk';
                 }
             }
 
@@ -1407,7 +1424,7 @@ final class AdminController
                     $mode = 'service_id:' . $candidateSource;
                     break;
                 }
-                if (($candidateCode === 401 || $candidateCode === 403) && $useImpersonation) {
+                if (!$bulkMode && ($candidateCode === 401 || $candidateCode === 403) && $useImpersonation) {
                     $fallbackClient = new EasyDcimClient($baseUrl, $token, false, $this->logger, $this->proxyConfig());
                     $fallbackResp = $fallbackClient->ports($candidateId, true, null, false);
                     $fallbackCode = (int) ($fallbackResp['http_code'] ?? 0);
@@ -1426,7 +1443,7 @@ final class AdminController
                 }
             }
 
-            if ($mode === 'none' && $serverId !== '') {
+            if (!$bulkMode && $mode === 'none' && $serverId !== '') {
                 $serverResp = $client->portsByServer($serverId, true, $email);
                 $serverCode = (int) ($serverResp['http_code'] ?? 0);
                 if ($serverCode >= 200 && $serverCode < 300) {
@@ -2461,6 +2478,7 @@ final class AdminController
             $remaining = array_slice($queue, $chunkSize);
             foreach ($batch as $id) {
                 $_POST['test_serviceid'] = (string) $id;
+                $_POST['__bulk_test'] = '1';
                 $result = $this->testServiceItem();
                 $type = (string) ($result['type'] ?? 'warning');
                 if ($type === 'success') {
@@ -2477,6 +2495,7 @@ final class AdminController
             } else {
                 $_POST['test_serviceid'] = $original;
             }
+            unset($_POST['__bulk_test']);
 
             $state['queue'] = $remaining;
             $state['remaining'] = count($remaining);
@@ -2868,7 +2887,7 @@ final class AdminController
         return $result;
     }
 
-    private function resolveServiceIdFromOrder(EasyDcimClient $client, string $orderId): string
+    private function resolveServiceIdFromOrder(EasyDcimClient $client, string $orderId, bool $allowClientScan = true): string
     {
         $orderId = trim($orderId);
         if ($orderId === '') {
@@ -2904,6 +2923,15 @@ final class AdminController
                 'order_id' => $orderId,
                 'error' => $e->getMessage(),
             ]);
+        }
+
+        if (!$allowClientScan) {
+            $this->logger->log('WARNING', 'resolve_service_id_from_order_empty', ['order_id' => $orderId, 'scan' => 'disabled']);
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => $cacheKey],
+                ['meta_value' => json_encode(['service_id' => '', 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            return '';
         }
 
         // fallback: scan client/services pages and match order_id

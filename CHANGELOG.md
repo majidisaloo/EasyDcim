@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.57] - 2026-02-19
+### Fixed
+- `Test All` bulk flow optimized to avoid heavy fallback calls in batch mode (no slow server-scan/order-scan paths during bulk checks).
+- Added auto-continue for bulk test queue (batch-by-batch) to keep each request short and avoid admin-page hangs.
+- Unassigned Services list now filters out non-actionable rows (pending/rejected/fraud/no locator) to prevent noisy/unstable output.
+
 ## [1.56] - 2026-02-19
 ### Fixed
 - Dashboard `Update Actions` buttons now render side-by-side again (horizontal layout), instead of stacked vertically.

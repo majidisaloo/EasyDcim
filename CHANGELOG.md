@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.33] - 2026-02-19
+### Changed
+- `Apply Latest Release` is immediate again (click-to-apply) and no longer depends on cron queue execution.
+- Update action now sets `update_in_progress` state during apply and clears it in `finally` for safer recovery on failure.
+### Fixed
+- Cleared stale queued-update flag after successful immediate apply.
+- Added explicit success/failure logs for click-based release apply flow.
+
 ## [1.32] - 2026-02-19
 ### Fixed
 - Aligned EasyDCIM bandwidth request body with v3 docs: `startDate` / `endDate` (instead of non-standard keys).

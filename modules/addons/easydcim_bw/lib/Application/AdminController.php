@@ -1203,17 +1203,54 @@ final class AdminController
     private function applyReleaseUpdate(): array
     {
         try {
+            if (function_exists('set_time_limit')) {
+                @set_time_limit(45);
+            }
+            if (!class_exists(\ZipArchive::class)) {
+                throw new \RuntimeException('ZipArchive extension is required.');
+            }
+
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
-                ['meta_key' => 'release_apply_requested'],
+                ['meta_key' => 'update_in_progress'],
                 ['meta_value' => '1', 'updated_at' => date('Y-m-d H:i:s')]
             );
+
+            $repo = self::RELEASE_REPO;
+            $release = $this->fetchLatestRelease($repo, 5);
+            $zipUrl = $this->extractZipUrl($release);
+            if ($zipUrl === '') {
+                throw new \RuntimeException('No ZIP asset found in latest release.');
+            }
+
+            $tmpZip = tempnam(sys_get_temp_dir(), 'edbw_rel_');
+            if ($tmpZip === false) {
+                throw new \RuntimeException('Could not allocate temp file.');
+            }
+            $this->downloadFile($zipUrl, $tmpZip, 20);
+            $this->extractAddonFromZip($tmpZip);
+            @unlink($tmpZip);
+
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
-                ['meta_key' => 'release_apply_requested_at'],
-                ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+                ['meta_key' => 'release_update_available'],
+                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
             );
-            return ['type' => 'success', 'text' => $this->t('release_apply_queued')];
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_apply_requested'],
+                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            $this->logger->log('INFO', 'release_update_applied_click', [
+                'tag' => (string) ($release['tag_name'] ?? ''),
+                'zip_url' => $zipUrl,
+            ]);
+            return ['type' => 'success', 'text' => $this->isFa ? 'آپدیت فوری با موفقیت اعمال شد.' : 'Release update applied immediately.'];
         } catch (\Throwable $e) {
-            return ['type' => 'danger', 'text' => $this->t('release_apply_queue_failed') . ': ' . $e->getMessage()];
+            $this->logger->log('ERROR', 'release_update_apply_click_failed', ['error' => $e->getMessage()]);
+            return ['type' => 'danger', 'text' => ($this->isFa ? 'آپدیت فوری ناموفق بود' : 'Immediate release update failed') . ': ' . $e->getMessage()];
+        } finally {
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'update_in_progress'],
+                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
         }
     }
 

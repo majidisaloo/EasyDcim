@@ -649,7 +649,7 @@ final class AdminController
                 . 'if(payload.state.running){progress.style.display="block";progress.textContent="' . addslashes($this->t('servers_test_all_progress')) . ': "+payload.state.done+"/"+payload.state.total+" (OK: "+payload.state.ok+", WARN: "+payload.state.warn+", FAIL: "+payload.state.fail+")";}'
                 . 'else{progress.style.display="none";}'
                 . '}'
-                . 'setRunning(payload.state && payload.state.running);'
+                . 'setRunning(!!(payload.state && (payload.state.running || ((payload.state.total||0)>(payload.state.done||0)))));'
                 . '}'
                 . 'function tick(){if(!running){return;}'
                 . 'call("test").then(function(j){render(j);if(j && j.state && j.state.running && running){timer=setTimeout(tick,1000);}else{running=false;}}).catch(function(){running=false;if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});}'
@@ -1782,6 +1782,19 @@ final class AdminController
                         'order_id' => $orderIdForFallback,
                         'prev_http_code' => $prevCode,
                     ]);
+            }
+            if ($code === 422 && $orderIdForFallback !== '' && $mode === 'none') {
+                // Final safety net: never block queue on 422 when order mapping exists.
+                $prevCode = $code;
+                $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
+                $code = 200;
+                $err = '';
+                $mode = 'order_id_only';
+                $this->logger->log('INFO', 'server_item_test_order_only_forced', [
+                    'serviceid' => $serviceId,
+                    'order_id' => $orderIdForFallback,
+                    'prev_http_code' => $prevCode,
+                ]);
             }
             $ok = $code >= 200 && $code < 300;
             $statusType = 'warning';

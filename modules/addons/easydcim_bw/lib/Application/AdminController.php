@@ -626,10 +626,28 @@ final class AdminController
         for ($page = 1; $page <= 5; $page++) {
             try {
                 $resp = $client->listAdminOrders(['page' => $page, 'per_page' => 100]);
+                $httpCode = (int) ($resp['http_code'] ?? 0);
+                if ($httpCode < 200 || $httpCode >= 300) {
+                    $this->logger->log('WARNING', 'servers_list_orders_http_failed', [
+                        'page' => $page,
+                        'http_code' => $httpCode,
+                    ]);
+                    break;
+                }
                 $orders = $this->extractListFromObject((array) ($resp['data'] ?? []));
+                $orders = array_values(array_filter($orders, static function ($row): bool {
+                    return is_array($row)
+                        && (
+                            isset($row['id'])
+                            || isset($row['order_id'])
+                            || isset($row['orderId'])
+                            || isset($row['service_id'])
+                            || isset($row['service'])
+                        );
+                }));
                 $this->logger->log('INFO', 'servers_list_orders_summary', [
                     'page' => $page,
-                    'http_code' => (int) ($resp['http_code'] ?? 0),
+                    'http_code' => $httpCode,
                     'items' => count($orders),
                 ]);
                 if (empty($orders)) {
@@ -2018,6 +2036,12 @@ final class AdminController
                     $resolvedService = $mappedService;
                 }
             }
+            if ($resolvedService === '' && $resolvedOrder !== '') {
+                $cachedService = $this->getServiceIdFromOrderMapCache($resolvedOrder);
+                if ($cachedService !== '') {
+                    $resolvedService = $cachedService;
+                }
+            }
             if ($resolveFromApi && $resolvedService === '' && $resolvedOrder !== '' && $resolverClient instanceof EasyDcimClient) {
                 if (array_key_exists($resolvedOrder, $resolvedFromOrder)) {
                     $resolvedService = (string) $resolvedFromOrder[$resolvedOrder];
@@ -2304,6 +2328,25 @@ final class AdminController
             return $obj;
         }
         return [$obj];
+    }
+
+    private function getServiceIdFromOrderMapCache(string $orderId): string
+    {
+        $orderId = trim($orderId);
+        if ($orderId === '') {
+            return '';
+        }
+        $raw = (string) Capsule::table('mod_easydcim_bw_guard_meta')
+            ->where('meta_key', 'order_service_map_' . $orderId)
+            ->value('meta_value');
+        if ($raw === '') {
+            return '';
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return '';
+        }
+        return trim((string) ($decoded['service_id'] ?? ''));
     }
 
     private function portsFromOrderDetails(EasyDcimClient $client, string $orderId): array

@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.47] - 2026-02-19
+### Fixed
+- Servers cache builder now ignores non-2xx `admin/orders` pages and filters out non-order payloads to prevent fake `items=1` cases and incomplete cache results.
+- Scoped list now fills `EasyDCIM Service` from local `order_service_map_*` cache when direct mapping is missing.
+- Servers table alignment tightened with fixed layout + centered link rendering.
+
 ## [1.46] - 2026-02-19
 ### Fixed
 - Added fallback port extraction from `admin/orders/{id}` payload when `client/services/{id}/ports` is blocked (`403/422`) or unavailable.

@@ -260,6 +260,16 @@
   vertical-align: middle !important;
 }
 
+.edbw-table-center {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.edbw-table-center a {
+  display: inline-block;
+  text-align: center;
+}
+
 @media (max-width: 900px) {
   .edbw-form-inline label {
     min-width: 100%;

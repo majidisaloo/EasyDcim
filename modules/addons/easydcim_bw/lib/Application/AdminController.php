@@ -533,8 +533,8 @@ final class AdminController
         $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
         $merged = [];
         $seen = [];
-        for ($page = 1; $page <= 2; $page++) {
-            $resp = $client->listServices(null, ['filter' => 'active', 'page' => $page, 'per_page' => 100]);
+        for ($page = 1; $page <= 3; $page++) {
+            $resp = $client->listServices(null, ['page' => $page, 'per_page' => 100]);
             $items = $this->extractServiceItems((array) ($resp['data'] ?? []));
             $this->logger->log('INFO', 'servers_list_services_summary', [
                 'mode' => 'direct',
@@ -555,6 +555,40 @@ final class AdminController
             }
             if (count($items) < 100) {
                 break;
+            }
+        }
+
+        if (empty($merged) && $this->settings->getBool('use_impersonation', false)) {
+            foreach ($this->getScopedClientEmails(30) as $email) {
+                try {
+                    $resp = $client->listServices($email, ['page' => 1, 'per_page' => 100]);
+                    $items = $this->extractServiceItems((array) ($resp['data'] ?? []));
+                    $this->logger->log('INFO', 'servers_list_services_summary', [
+                        'mode' => 'impersonated',
+                        'impersonate' => $email,
+                        'http_code' => (int) ($resp['http_code'] ?? 0),
+                        'items' => count($items),
+                    ]);
+                    foreach ($items as $item) {
+                        $k = trim((string) ($item['service_id'] ?? ''));
+                        if ($k === '') {
+                            $k = md5(json_encode($item, JSON_UNESCAPED_SLASHES));
+                        }
+                        if (isset($seen[$k])) {
+                            continue;
+                        }
+                        $seen[$k] = true;
+                        $merged[] = $item;
+                    }
+                    if (!empty($merged)) {
+                        break;
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->log('WARNING', 'servers_list_services_impersonate_failed', [
+                        'impersonate' => $email,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
         }
 
@@ -1064,7 +1098,7 @@ final class AdminController
                 return ['type' => 'warning', 'text' => $this->t('base_or_token_missing')];
             }
 
-            $rows = $this->getScopedHostingServices();
+            $rows = $this->getScopedHostingServices([], false);
             $target = null;
             foreach ($rows as $row) {
                 if ((int) ($row['serviceid'] ?? 0) === $serviceId) {
@@ -1080,12 +1114,14 @@ final class AdminController
             $email = (string) ($target['email'] ?? '');
             $response = ['http_code' => 0, 'error' => ''];
             $mode = 'none';
-            if ((string) ($target['easydcim_service_id'] ?? '') !== '') {
+            $resolvedServiceId = (string) ($target['easydcim_service_id'] ?? '');
+            if ($resolvedServiceId === '' && (string) ($target['easydcim_order_id'] ?? '') !== '') {
+                $resolvedServiceId = $this->resolveServiceIdFromOrder($client, (string) $target['easydcim_order_id']);
+            }
+
+            if ($resolvedServiceId !== '') {
                 $mode = 'service_id';
-                $response = $client->ports((string) $target['easydcim_service_id'], true, $email);
-            } elseif ((string) ($target['easydcim_server_id'] ?? '') !== '') {
-                $mode = 'server_id';
-                $response = $client->portsByServer((string) $target['easydcim_server_id'], true, $email);
+                $response = $client->ports($resolvedServiceId, true, $email);
             }
             $code = (int) ($response['http_code'] ?? 0);
             $err = trim((string) ($response['error'] ?? ''));
@@ -1800,21 +1836,11 @@ final class AdminController
     {
         $items = [];
         if (isset($payload['data']) && is_array($payload['data'])) {
-            if (isset($payload['data']['items']) && is_array($payload['data']['items'])) {
-                $items = $payload['data']['items'];
-            } elseif (isset($payload['data']['data']) && is_array($payload['data']['data'])) {
-                $items = $payload['data']['data'];
-            } else {
-                $items = $payload['data'];
-            }
+            $items = $this->extractListFromObject($payload['data']);
         } elseif (isset($payload['result']) && is_array($payload['result'])) {
-            if (isset($payload['result']['items']) && is_array($payload['result']['items'])) {
-                $items = $payload['result']['items'];
-            } elseif (isset($payload['result']['data']) && is_array($payload['result']['data'])) {
-                $items = $payload['result']['data'];
-            } else {
-                $items = $payload['result'];
-            }
+            $items = $this->extractListFromObject($payload['result']);
+        } elseif (isset($payload['services']) && is_array($payload['services'])) {
+            $items = $payload['services'];
         } elseif (array_keys($payload) === range(0, count($payload) - 1)) {
             $items = $payload;
         } else {
@@ -1866,6 +1892,70 @@ final class AdminController
             ];
         }
         return $normalized;
+    }
+
+    private function extractListFromObject(array $obj): array
+    {
+        foreach (['items', 'data', 'records', 'rows', 'services', 'collection'] as $key) {
+            if (isset($obj[$key]) && is_array($obj[$key])) {
+                return $obj[$key];
+            }
+        }
+        if (array_keys($obj) === range(0, count($obj) - 1)) {
+            return $obj;
+        }
+        return [$obj];
+    }
+
+    private function resolveServiceIdFromOrder(EasyDcimClient $client, string $orderId): string
+    {
+        $orderId = trim($orderId);
+        if ($orderId === '') {
+            return '';
+        }
+        try {
+            $details = $client->orderDetails($orderId);
+            $data = (array) ($details['data'] ?? []);
+            $id = $this->findServiceIdRecursive($data);
+            if ($id !== '') {
+                $this->logger->log('INFO', 'resolved_service_id_from_order', [
+                    'order_id' => $orderId,
+                    'service_id' => $id,
+                    'http_code' => (int) ($details['http_code'] ?? 0),
+                ]);
+            }
+            return $id;
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'resolve_service_id_from_order_failed', [
+                'order_id' => $orderId,
+                'error' => $e->getMessage(),
+            ]);
+            return '';
+        }
+    }
+
+    private function findServiceIdRecursive($value): string
+    {
+        if (is_array($value)) {
+            foreach (['service_id', 'serviceId'] as $k) {
+                if (isset($value[$k]) && trim((string) $value[$k]) !== '') {
+                    return trim((string) $value[$k]);
+                }
+            }
+            if (isset($value['service']) && is_array($value['service'])) {
+                $sid = trim((string) ($value['service']['id'] ?? $value['service']['service_id'] ?? ''));
+                if ($sid !== '') {
+                    return $sid;
+                }
+            }
+            foreach ($value as $child) {
+                $sid = $this->findServiceIdRecursive($child);
+                if ($sid !== '') {
+                    return $sid;
+                }
+            }
+        }
+        return '';
     }
 
     private function extractPortItems(array $payload): array

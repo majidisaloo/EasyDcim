@@ -2,6 +2,16 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.34] - 2026-02-19
+### Fixed
+- Servers `Test` action no longer uses unsupported server-port fallback endpoints as primary path; it now resolves `service_id` from `order_id` and tests `/client/services/{id}/ports`.
+- Scoped service lookup for `Test` now uses fast mode (no bulk port lookups), preventing test-action hangs.
+- Improved service-list parsing for additional v3 payload layouts (`records`, `rows`, `services`, `collection`).
+### Changed
+- Servers fetch now retries with impersonated client emails if direct list is empty, without `filter=active` hard constraint.
+- Added admin order-details helper for resolving missing `EasyDCIM Service ID` from known `Order ID`.
+- Added logs for order->service resolution path (`resolved_service_id_from_order`, `resolve_service_id_from_order_failed`).
+
 ## [1.33] - 2026-02-19
 ### Changed
 - `Apply Latest Release` is immediate again (click-to-apply) and no longer depends on cron queue execution.

@@ -100,6 +100,11 @@ final class EasyDcimClient
         return $this->request('GET', '/api/v3/client/services', null, $impersonateUser, false, 5, $query);
     }
 
+    public function orderDetails(string $orderId): array
+    {
+        return $this->request('GET', '/api/v3/admin/orders/' . rawurlencode($orderId), null, null, false, 5);
+    }
+
     public function pingInfo(): array
     {
         if ($this->baseUrl === '' || $this->token === '') {

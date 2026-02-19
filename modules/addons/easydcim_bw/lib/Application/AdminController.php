@@ -453,6 +453,7 @@ final class AdminController
         $baseUrl = $this->settings->getString('easydcim_base_url');
         $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
         $apiAvailable = $baseUrl !== '' && $token !== '';
+        $autoBatch = isset($_REQUEST['autobatch']) && (string) $_REQUEST['autobatch'] === '1';
         $easyServices = $this->getEasyServicesCacheOnly();
         $services = $this->getScopedHostingServices($easyServices, false, false);
 
@@ -520,7 +521,12 @@ final class AdminController
                     . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
                     . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
                     . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')</div>';
-                echo '<script>(function(){var f=document.getElementById("edbw-test-all-continue-form");if(!f){return;}setTimeout(function(){try{f.submit();}catch(e){}},900);})();</script>';
+                if ($autoBatch) {
+                    $nextUrl = 'addonmodules.php?module=easydcim_bw&tab=servers&action=test_all_services&autobatch=1';
+                    echo '<meta http-equiv="refresh" content="1;url=' . htmlspecialchars($nextUrl) . '">';
+                } else {
+                    echo '<script>(function(){var f=document.getElementById("edbw-test-all-continue-form");if(!f){return;}setTimeout(function(){try{f.submit();}catch(e){}},900);})();</script>';
+                }
             }
             echo '</div>';
             if (count($easyServices) === 0 && $cacheAt === '') {
@@ -2439,7 +2445,7 @@ final class AdminController
             if (function_exists('set_time_limit')) {
                 @set_time_limit(60);
             }
-            $chunkSize = 5;
+            $chunkSize = 1;
             $state = $this->getTestAllState();
             $queue = $state['queue'];
 

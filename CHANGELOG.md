@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.59] - 2026-02-19
+### Performance
+- `Test All` now runs strictly one service per request (`chunkSize=1`) for smoother server load.
+- Added robust auto-continue path with `autobatch=1` + timed refresh, so bulk testing no longer gets stuck at first batch.
+
 ## [1.58] - 2026-02-19
 ### Fixed
 - Fixed order-details port parsing path where fallback payload was wrapped as `{ports: [...]}` but parser only read `data/result`; this caused false `No ports found` despite resolved order ports.

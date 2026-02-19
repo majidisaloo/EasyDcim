@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.29] - 2026-02-19
+### Fixed
+- Resolved admin-side update timeout path that could lead to `504 Gateway Timeout` on shared/proxy setups.
+- Release HTTP calls now use stricter connect/low-speed timeouts to fail fast on bad outbound connectivity.
+### Changed
+- `Apply Latest Release` is now non-blocking: it queues update request immediately instead of downloading/extracting inside the admin web request.
+- Actual release download/extract runs in `AfterCronJob` with lock protection and `update_in_progress` state updates.
+- Added structured logs for queued-release apply results (`release_update_applied`, `release_update_apply_failed`).
+
 ## [1.28] - 2026-02-19
 ### Fixed
 - Service list parsing now supports nested payload formats (`data.items`, `data.data`, `result.items`, `result.data`) to avoid empty-list false negatives.

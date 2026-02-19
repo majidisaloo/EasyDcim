@@ -2,7 +2,7 @@
 
 Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git updates, and complete traffic purchase audit logs.
 
-Current version: `1.28`
+Current version: `1.29`
 
 ## Key Features
 
@@ -11,6 +11,7 @@ Current version: `1.28`
 - Port enforcement resolves port IDs by service, with fallback by `easydcim_server_id`.
 - Short version from `modules/addons/easydcim_bw/VERSION` (e.g. `1.16`) with git metadata when available.
 - Auto update check from GitHub releases + one-click admin update without `shell_exec`.
+- Update apply is now queued and executed by WHMCS cron to avoid admin-page timeouts during download/extract.
 - Strict additive/idempotent migrations only on `mod_easydcim_bw_guard_*` tables.
 - Deactivate keeps all module data/settings by default; optional `Purge Data On Deactivate` removes only module tables/settings.
 - Purchase logs include invoice, cycle window, reset date, actor, and timestamp.
@@ -49,4 +50,4 @@ Default mode is `check_oneclick`:
 
 - Cron/check action checks latest GitHub release.
 - Admin sees availability in dashboard.
-- Admin applies latest release zip with one click (no shell access required).
+- Admin apply action queues update request instantly; cron downloads/extracts the release in background.

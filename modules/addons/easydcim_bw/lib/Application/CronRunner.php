@@ -120,6 +120,8 @@ final class CronRunner
             ['meta_key' => 'last_update_check_at'],
             ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
         );
+
+        $this->processQueuedReleaseUpdate();
     }
 
     private function fetchLatestRelease(string $repo): array
@@ -135,7 +137,10 @@ final class CronRunner
 
         $ch = curl_init('https://api.github.com/repos/' . $repo . '/releases/latest');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+        curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+        curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, 8);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW', 'Accept: application/vnd.github+json']);
         $raw = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
@@ -568,5 +573,151 @@ final class CronRunner
             'password' => Crypto::safeDecrypt($this->settings->getString('proxy_password')),
             'allow_self_signed' => $this->settings->getBool('allow_self_signed', true),
         ];
+    }
+
+    private function processQueuedReleaseUpdate(): void
+    {
+        $queued = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_apply_requested')->value('meta_value');
+        if ($queued !== '1') {
+            return;
+        }
+
+        $lock = new LockManager();
+        if (!$lock->acquire('update_apply', 900)) {
+            return;
+        }
+
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'update_in_progress'],
+            ['meta_value' => '1', 'updated_at' => date('Y-m-d H:i:s')]
+        );
+
+        try {
+            if (function_exists('set_time_limit')) {
+                @set_time_limit(120);
+            }
+            if (!class_exists(\ZipArchive::class)) {
+                throw new \RuntimeException('ZipArchive extension is required.');
+            }
+
+            $release = $this->fetchLatestRelease(self::RELEASE_REPO);
+            $zipUrl = $this->extractZipUrl($release);
+            if ($zipUrl === '') {
+                throw new \RuntimeException('No ZIP asset found in latest release.');
+            }
+
+            $tmpZip = tempnam(sys_get_temp_dir(), 'edbw_rel_');
+            if ($tmpZip === false) {
+                throw new \RuntimeException('Could not allocate temp file.');
+            }
+
+            $this->downloadFile($zipUrl, $tmpZip, 60);
+            $this->extractAddonFromZip($tmpZip);
+            @unlink($tmpZip);
+
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_update_available'],
+                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_apply_requested'],
+                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            $this->logger->log('INFO', 'release_update_applied', [
+                'tag' => (string) ($release['tag_name'] ?? ''),
+                'zip_url' => $zipUrl,
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'release_update_apply_failed', ['error' => $e->getMessage()]);
+        } finally {
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'update_in_progress'],
+                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            $lock->release('update_apply');
+        }
+    }
+
+    private function extractZipUrl(array $release): string
+    {
+        foreach (($release['assets'] ?? []) as $asset) {
+            $name = strtolower((string) ($asset['name'] ?? ''));
+            if (substr($name, -4) === '.zip' && !empty($asset['browser_download_url'])) {
+                return (string) $asset['browser_download_url'];
+            }
+        }
+        return '';
+    }
+
+    private function downloadFile(string $url, string $target, int $timeout = 60): void
+    {
+        $fh = fopen($target, 'wb');
+        if ($fh === false) {
+            throw new \RuntimeException('Cannot open temp file for writing.');
+        }
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_FILE, $fh);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, max(10, $timeout));
+        curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+        curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, 10);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW']);
+        curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        fclose($fh);
+
+        if ($code < 200 || $code >= 300) {
+            throw new \RuntimeException('Download failed: HTTP ' . $code . ' ' . $err);
+        }
+    }
+
+    private function extractAddonFromZip(string $zipPath): void
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($zipPath) !== true) {
+            throw new \RuntimeException('Cannot open downloaded ZIP.');
+        }
+
+        $whmcsRoot = realpath(__DIR__ . '/../../../..');
+        if ($whmcsRoot === false) {
+            $zip->close();
+            throw new \RuntimeException('Cannot resolve WHMCS root path.');
+        }
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            if (!is_string($name) || strpos($name, 'modules/addons/easydcim_bw/') === false) {
+                continue;
+            }
+
+            $normalized = preg_replace('#^[^/]+/#', '', $name, 1);
+            if (!is_string($normalized) || strpos($normalized, 'modules/addons/easydcim_bw/') !== 0) {
+                continue;
+            }
+
+            $target = $whmcsRoot . '/' . $normalized;
+            if (substr($normalized, -1) === '/') {
+                if (!is_dir($target)) {
+                    mkdir($target, 0755, true);
+                }
+                continue;
+            }
+
+            $dir = dirname($target);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            $content = $zip->getFromIndex($i);
+            if ($content === false) {
+                continue;
+            }
+            file_put_contents($target, $content);
+        }
+
+        $zip->close();
     }
 }

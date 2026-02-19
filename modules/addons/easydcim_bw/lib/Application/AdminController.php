@@ -1090,7 +1090,11 @@ final class AdminController
     private function autoRefreshReleaseStatus(): void
     {
         try {
-            $release = $this->fetchLatestRelease(self::RELEASE_REPO, 10);
+            $last = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_last_auto_check_at')->value('meta_value');
+            if ($last !== '' && strtotime($last) > time() - 300) {
+                return;
+            }
+            $release = $this->fetchLatestRelease(self::RELEASE_REPO, 5);
             $latestTag = (string) ($release['tag_name'] ?? '');
             if ($latestTag === '') {
                 return;
@@ -1109,6 +1113,10 @@ final class AdminController
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
                 ['meta_key' => 'release_update_available'],
                 ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_last_auto_check_at'],
+                ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
             );
         } catch (\Throwable $e) {
         }
@@ -1168,33 +1176,17 @@ final class AdminController
     private function applyReleaseUpdate(): array
     {
         try {
-            if (!class_exists(\ZipArchive::class)) {
-                throw new \RuntimeException('ZipArchive extension is required.');
-            }
-
-            $repo = self::RELEASE_REPO;
-            $release = $this->fetchLatestRelease($repo);
-            $zipUrl = $this->extractZipUrl($release);
-            if ($zipUrl === '') {
-                throw new \RuntimeException('No ZIP asset found in latest release.');
-            }
-
-            $tmpZip = tempnam(sys_get_temp_dir(), 'edbw_rel_');
-            if ($tmpZip === false) {
-                throw new \RuntimeException('Could not allocate temp file.');
-            }
-            $this->downloadFile($zipUrl, $tmpZip);
-            $this->extractAddonFromZip($tmpZip);
-            @unlink($tmpZip);
-
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
-                ['meta_key' => 'release_update_available'],
-                ['meta_value' => '0', 'updated_at' => date('Y-m-d H:i:s')]
+                ['meta_key' => 'release_apply_requested'],
+                ['meta_value' => '1', 'updated_at' => date('Y-m-d H:i:s')]
             );
-
-            return ['type' => 'success', 'text' => 'Release update applied successfully.'];
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_apply_requested_at'],
+                ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            return ['type' => 'success', 'text' => $this->t('release_apply_queued')];
         } catch (\Throwable $e) {
-            return ['type' => 'danger', 'text' => 'Release update failed: ' . $e->getMessage()];
+            return ['type' => 'danger', 'text' => $this->t('release_apply_queue_failed') . ': ' . $e->getMessage()];
         }
     }
 
@@ -1231,7 +1223,10 @@ final class AdminController
 
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(5, max(1, $timeout)));
         curl_setopt($ch, CURLOPT_TIMEOUT, max(1, $timeout));
+        curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+        curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, max(3, min(8, $timeout)));
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW', 'Accept: application/vnd.github+json']);
         $raw = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
@@ -1249,7 +1244,7 @@ final class AdminController
         return $data;
     }
 
-    private function downloadFile(string $url, string $target): void
+    private function downloadFile(string $url, string $target, int $timeout = 25): void
     {
         $fh = fopen($target, 'wb');
         if ($fh === false) {
@@ -1259,7 +1254,10 @@ final class AdminController
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_FILE, $fh);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 120);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, max(5, $timeout));
+        curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+        curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, 8);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW']);
         curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
@@ -2014,6 +2012,8 @@ final class AdminController
             'check_update_now' => 'بررسی آپدیت',
             'apply_latest_release' => 'اعمال آخرین ریلیز',
             'update_banner' => 'آپدیت جدید برای ماژول موجود است. لطفا از داشبورد اقدام کنید.',
+            'release_apply_queued' => 'درخواست آپدیت ثبت شد و در اجرای بعدی کرون اعمال می‌شود.',
+            'release_apply_queue_failed' => 'ثبت درخواست آپدیت ناموفق بود',
             'no_data' => 'بدون داده',
             'hc_php_version' => 'نسخه PHP',
             'hc_current' => 'فعلی',
@@ -2190,6 +2190,8 @@ final class AdminController
             'check_update_now' => 'Check Update Now',
             'apply_latest_release' => 'Apply Latest Release',
             'update_banner' => 'A new module update is available. Please apply it from the dashboard.',
+            'release_apply_queued' => 'Update request queued. It will be applied on the next cron run.',
+            'release_apply_queue_failed' => 'Failed to queue release update',
             'no_data' => 'No data',
             'hc_php_version' => 'PHP version',
             'hc_current' => 'Current',

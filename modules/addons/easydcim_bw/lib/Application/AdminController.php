@@ -430,54 +430,12 @@ final class AdminController
 
         if ($apiAvailable) {
             try {
-                $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
-                $resp = $client->listServices();
-                $easyServices = $this->extractServiceItems((array) ($resp['data'] ?? []));
-                $this->logger->log('INFO', 'servers_list_services_summary', [
-                    'mode' => 'direct',
-                    'http_code' => (int) ($resp['http_code'] ?? 0),
-                    'items' => count($easyServices),
-                ]);
-                if (empty($easyServices) && $this->settings->getBool('use_impersonation', false)) {
-                    $merged = [];
-                    $seen = [];
-                    foreach ($this->getScopedClientEmails(40) as $email) {
-                        try {
-                            $r = $client->listServices($email);
-                            $items = $this->extractServiceItems((array) ($r['data'] ?? []));
-                            $this->logger->log('INFO', 'servers_list_services_summary', [
-                                'mode' => 'impersonated',
-                                'impersonate' => $email,
-                                'http_code' => (int) ($r['http_code'] ?? 0),
-                                'items' => count($items),
-                            ]);
-                            foreach ($items as $item) {
-                                $k = trim((string) ($item['service_id'] ?? ''));
-                                if ($k === '') {
-                                    $k = md5(json_encode($item, JSON_UNESCAPED_SLASHES));
-                                }
-                                if (isset($seen[$k])) {
-                                    continue;
-                                }
-                                $seen[$k] = true;
-                                $merged[] = $item;
-                            }
-                        } catch (\Throwable $e) {
-                            $this->logger->log('WARNING', 'servers_list_services_impersonate_failed', [
-                                'impersonate' => $email,
-                                'error' => $e->getMessage(),
-                            ]);
-                        }
-                    }
-                    if (!empty($merged)) {
-                        $easyServices = $merged;
-                    }
-                }
+                $easyServices = $this->getCachedEasyServices();
             } catch (\Throwable $e) {
                 $this->logger->log('WARNING', 'servers_tab_list_failed', ['error' => $e->getMessage()]);
             }
         }
-        $services = $this->getScopedHostingServices($easyServices);
+        $services = $this->getScopedHostingServices($easyServices, false);
 
         $mappedServiceIds = [];
         foreach ($services as $svc) {
@@ -539,6 +497,68 @@ final class AdminController
         }
         echo '</tbody></table></div>';
         echo '</div>';
+    }
+
+    private function getCachedEasyServices(): array
+    {
+        $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_at')->value('meta_value');
+        $cacheJson = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_json')->value('meta_value');
+        if ($cacheAt !== '' && strtotime($cacheAt) > time() - 120 && $cacheJson !== '') {
+            $decoded = json_decode($cacheJson, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        $items = $this->fetchEasyServices();
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'servers_list_cache_json'],
+            ['meta_value' => json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'servers_list_cache_at'],
+            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        return $items;
+    }
+
+    private function fetchEasyServices(): array
+    {
+        $baseUrl = $this->settings->getString('easydcim_base_url');
+        $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+        if ($baseUrl === '' || $token === '') {
+            return [];
+        }
+
+        $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+        $merged = [];
+        $seen = [];
+        for ($page = 1; $page <= 2; $page++) {
+            $resp = $client->listServices(null, ['filter' => 'active', 'page' => $page, 'per_page' => 100]);
+            $items = $this->extractServiceItems((array) ($resp['data'] ?? []));
+            $this->logger->log('INFO', 'servers_list_services_summary', [
+                'mode' => 'direct',
+                'page' => $page,
+                'http_code' => (int) ($resp['http_code'] ?? 0),
+                'items' => count($items),
+            ]);
+            foreach ($items as $item) {
+                $k = trim((string) ($item['service_id'] ?? ''));
+                if ($k === '') {
+                    $k = md5(json_encode($item, JSON_UNESCAPED_SLASHES));
+                }
+                if (isset($seen[$k])) {
+                    continue;
+                }
+                $seen[$k] = true;
+                $merged[] = $item;
+            }
+            if (count($items) < 100) {
+                break;
+            }
+        }
+
+        return $merged;
     }
 
     private function renderLogsTab(): void
@@ -1769,6 +1789,24 @@ final class AdminController
             if (!is_array($row)) {
                 continue;
             }
+            $related = isset($row['related']) && is_array($row['related']) ? $row['related'] : [];
+            $relatedId = (string) ($row['related_id'] ?? $row['server_id'] ?? $row['device_id'] ?? $row['item_id'] ?? '');
+            $ip = (string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? '');
+            if ($ip === '' && isset($related['ip_addresses']) && is_array($related['ip_addresses'])) {
+                foreach ($related['ip_addresses'] as $ipRow) {
+                    if (!is_array($ipRow)) {
+                        continue;
+                    }
+                    $cand = trim((string) ($ipRow['address'] ?? $ipRow['ip'] ?? ''));
+                    if ($cand !== '') {
+                        $ip = $cand;
+                        break;
+                    }
+                }
+            }
+            if ($ip === '') {
+                $ip = trim((string) ($related['ip'] ?? $related['dedicated_ip'] ?? $related['ipv4'] ?? ''));
+            }
             $state = strtolower((string) ($row['status'] ?? $row['state'] ?? ''));
             $upRaw = $row['is_up'] ?? $row['up'] ?? null;
             $isUp = false;
@@ -1783,9 +1821,9 @@ final class AdminController
             }
             $normalized[] = [
                 'service_id' => (string) ($row['id'] ?? $row['service_id'] ?? ''),
-                'server_id' => (string) ($row['server_id'] ?? $row['device_id'] ?? $row['item_id'] ?? ''),
+                'server_id' => $relatedId,
                 'order_id' => (string) ($row['order_id'] ?? $row['orderId'] ?? ''),
-                'ip' => (string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? ''),
+                'ip' => $ip,
                 'status' => (string) ($row['status'] ?? $row['state'] ?? ''),
                 'is_up' => $isUp,
             ];

@@ -2,6 +2,16 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.32] - 2026-02-19
+### Fixed
+- Aligned EasyDCIM bandwidth request body with v3 docs: `startDate` / `endDate` (instead of non-standard keys).
+- Normalized EasyDCIM base URL input by removing trailing `/backend` automatically for API calls.
+- Servers tab no longer runs expensive per-service port lookups during list render (prevents hangs/timeouts on large scopes).
+### Changed
+- Servers list fetch now uses API-filtered paging (`filter=active`, `per_page`, `page`) with strict 5-second request budget.
+- Added short cache for servers list (`servers_list_cache_*`) to avoid repeated API calls on rapid tab refresh.
+- Service-item extraction now supports v3-style payloads with `related_id` and `related.ip_addresses`.
+
 ## [1.31] - 2026-02-19
 ### Fixed
 - Removed automatic outbound release-check call from admin page load to prevent blocking/timeouts while opening module UI.

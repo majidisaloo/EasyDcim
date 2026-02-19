@@ -17,6 +17,8 @@ final class EasyDcimClient
 
     public function __construct(string $baseUrl, string $token, bool $impersonation, Logger $logger, array $proxy = [])
     {
+        $baseUrl = trim($baseUrl);
+        $baseUrl = preg_replace('#/backend/?$#i', '', $baseUrl) ?? $baseUrl;
         $this->baseUrl = rtrim($baseUrl, '/');
         $this->token = $token;
         $this->impersonation = $impersonation;
@@ -28,8 +30,8 @@ final class EasyDcimClient
     public function bandwidth(string $serviceId, string $start, string $end, ?string $impersonateUser = null): array
     {
         return $this->request('POST', '/api/v3/client/services/' . rawurlencode($serviceId) . '/bandwidth', [
-            'start' => $start,
-            'end' => $end,
+            'startDate' => $start,
+            'endDate' => $end,
         ], $impersonateUser);
     }
 
@@ -93,9 +95,9 @@ final class EasyDcimClient
         return ($result['http_code'] ?? 0) >= 200 && ($result['http_code'] ?? 0) < 300;
     }
 
-    public function listServices(?string $impersonateUser = null): array
+    public function listServices(?string $impersonateUser = null, array $query = []): array
     {
-        return $this->request('GET', '/api/v3/client/services', null, $impersonateUser, false);
+        return $this->request('GET', '/api/v3/client/services', null, $impersonateUser, false, 5, $query);
     }
 
     public function pingInfo(): array
@@ -113,9 +115,20 @@ final class EasyDcimClient
         ];
     }
 
-    private function request(string $method, string $path, ?array $body = null, ?string $impersonateUser = null, bool $throwOnError = true, int $timeout = 30): array
+    private function request(
+        string $method,
+        string $path,
+        ?array $body = null,
+        ?string $impersonateUser = null,
+        bool $throwOnError = true,
+        int $timeout = 5,
+        array $query = []
+    ): array
     {
         $url = $this->baseUrl . $path;
+        if (!empty($query)) {
+            $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($query);
+        }
         $ch = curl_init($url);
         $headers = [
             'Authorization: Bearer ' . $this->token,

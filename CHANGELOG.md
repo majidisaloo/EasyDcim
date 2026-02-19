@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.37] - 2026-02-19
+### Fixed
+- Immediate updater now fails explicitly if no files are actually written (prevents false-success message).
+- Added strict write checks for every extracted file and directory creation in release apply flow.
+- Added post-apply version verification against release tag (`installed` vs `expected`) to detect path/permission mismatch immediately.
+
 ## [1.36] - 2026-02-19
 ### Fixed
 - Removed server/item port fallback from enforcement flow to stop mass invalid API calls (`/client/servers/*/ports`, `/client/items/*/ports`).

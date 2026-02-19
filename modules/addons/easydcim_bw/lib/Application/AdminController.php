@@ -1329,8 +1329,19 @@ final class AdminController
                 throw new \RuntimeException('Could not allocate temp file.');
             }
             $this->downloadFile($zipUrl, $tmpZip, 20);
-            $this->extractAddonFromZip($tmpZip);
+            $written = $this->extractAddonFromZip($tmpZip);
             @unlink($tmpZip);
+            if ($written <= 0) {
+                throw new \RuntimeException('No addon files were written. Check filesystem permissions for modules/addons/easydcim_bw.');
+            }
+
+            $latestVersion = ltrim((string) ($release['tag_name'] ?? ''), 'vV');
+            $installedVersion = (string) (Version::current($this->moduleDir)['module_version'] ?? '');
+            if ($latestVersion !== '' && $this->compareVersion($installedVersion, $latestVersion) < 0) {
+                throw new \RuntimeException(
+                    'Update copy did not apply to active module path (installed=' . $installedVersion . ', expected=' . $latestVersion . ').'
+                );
+            }
 
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
                 ['meta_key' => 'release_update_available'],
@@ -1436,7 +1447,7 @@ final class AdminController
         }
     }
 
-    private function extractAddonFromZip(string $zipPath): void
+    private function extractAddonFromZip(string $zipPath): int
     {
         $zip = new \ZipArchive();
         if ($zip->open($zipPath) !== true) {
@@ -1449,6 +1460,7 @@ final class AdminController
             throw new \RuntimeException('Cannot resolve WHMCS root path.');
         }
 
+        $writtenFiles = 0;
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $name = $zip->getNameIndex($i);
             if (!is_string($name) || strpos($name, 'modules/addons/easydcim_bw/') !== 0) {
@@ -1464,15 +1476,23 @@ final class AdminController
 
             $dir = dirname($target);
             if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
+                if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
+                    $zip->close();
+                    throw new \RuntimeException('Cannot create directory: ' . $dir);
+                }
             }
             $content = $zip->getFromIndex($i);
             if ($content === false) {
                 continue;
             }
-            file_put_contents($target, $content);
+            if (file_put_contents($target, $content) === false) {
+                $zip->close();
+                throw new \RuntimeException('Cannot write file: ' . $target);
+            }
+            $writtenFiles++;
         }
         $zip->close();
+        return $writtenFiles;
     }
 
     private function compareVersion(string $a, string $b): int

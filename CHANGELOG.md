@@ -2,6 +2,18 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.54] - 2026-02-19
+### Changed
+- `Server ID` is now prioritized in service test flow:
+  - resolve `order_id` from `server_id` when order is missing
+  - prefer `admin/orders/{id}` port extraction when server/order mapping exists
+- Added cached resolver for `server_id -> order_id` with diagnostic logs.
+### Fixed
+- Improved extraction/logging of real port connection identifiers for troubleshooting:
+  - `port_ids` (server-side port id)
+  - `connected_port_ids` (connected switch port id)
+  - `connected_item_ids` (connected switch/item id)
+
 ## [1.53] - 2026-02-19
 ### Fixed
 - `Test All` no longer runs all services in one long request; it now executes in queue mode with small batches (5 services per run) to prevent admin hang/timeouts.

@@ -1358,6 +1358,9 @@ final class AdminController
             $orderId = trim((string) ($target['easydcim_order_id'] ?? ''));
             $serverId = trim((string) ($target['easydcim_server_id'] ?? ''));
             $ip = trim((string) ($target['ip'] ?? ''));
+            if ($orderId === '' && $serverId !== '') {
+                $orderId = $this->resolveOrderIdFromServer($client, $serverId, $ip);
+            }
             foreach ($this->getEasyServicesCacheOnly() as $item) {
                 if (!is_array($item)) {
                     continue;
@@ -1380,7 +1383,19 @@ final class AdminController
                 $addCandidate($serviceCandidates, $this->resolveServiceIdFromOrder($client, $orderId), 'order_api');
             }
 
+            // Prefer order-details when server/order mapping exists (more stable in restricted client endpoints).
+            if ($orderId !== '' && $serverId !== '') {
+                $orderPortPrimary = $this->portsFromOrderDetails($client, $orderId);
+                if (!empty($orderPortPrimary['ok'])) {
+                    $response = ['http_code' => 200, 'data' => ['ports' => $orderPortPrimary['items']], 'error' => ''];
+                    $mode = 'order_details_ports:server_order';
+                }
+            }
+
             foreach ($serviceCandidates as $candidate) {
+                if ($mode !== 'none') {
+                    break;
+                }
                 $candidateId = (string) ($candidate['id'] ?? '');
                 $candidateSource = (string) ($candidate['source'] ?? 'candidate');
                 $candidateResp = $client->ports($candidateId, true, $email, false);
@@ -2930,6 +2945,89 @@ final class AdminController
         Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
             ['meta_key' => $cacheKey],
             ['meta_value' => json_encode(['service_id' => '', 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        return '';
+    }
+
+    private function resolveOrderIdFromServer(EasyDcimClient $client, string $serverId, string $ip = ''): string
+    {
+        $serverId = trim($serverId);
+        if ($serverId === '') {
+            return '';
+        }
+        $cacheKey = 'server_order_map_' . $serverId;
+        $cachedRaw = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', $cacheKey)->value('meta_value');
+        if ($cachedRaw !== '') {
+            $cached = json_decode($cachedRaw, true);
+            if (is_array($cached) && isset($cached['checked_at'], $cached['order_id']) && strtotime((string) $cached['checked_at']) > time() - 1800) {
+                return trim((string) $cached['order_id']);
+            }
+        }
+
+        try {
+            $pickedOrder = '';
+            $pickedIp = trim($ip);
+            for ($page = 1; $page <= 3; $page++) {
+                $resp = $client->listAdminOrders(['page' => $page, 'per_page' => 100]);
+                $httpCode = (int) ($resp['http_code'] ?? 0);
+                if ($httpCode < 200 || $httpCode >= 300) {
+                    break;
+                }
+                $rows = $this->extractListFromObject((array) ($resp['data'] ?? []));
+                if (empty($rows)) {
+                    break;
+                }
+                foreach ($rows as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $rowServer = trim((string) ($row['related_id'] ?? $row['server_id'] ?? $row['item_id'] ?? ''));
+                    if ($rowServer !== $serverId) {
+                        continue;
+                    }
+                    $orderId = trim((string) ($row['id'] ?? $row['order_id'] ?? $row['orderId'] ?? ''));
+                    if ($orderId === '') {
+                        continue;
+                    }
+                    $rowIp = trim((string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? ''));
+                    if ($rowIp === '' && isset($row['related']) && is_array($row['related'])) {
+                        $rowIp = trim((string) ($row['related']['ip'] ?? $row['related']['dedicated_ip'] ?? $row['related']['ipv4'] ?? ''));
+                    }
+                    if ($pickedIp !== '' && $rowIp !== '' && $rowIp === $pickedIp) {
+                        $pickedOrder = $orderId;
+                        break 2;
+                    }
+                    if ($pickedOrder === '') {
+                        $pickedOrder = $orderId;
+                    }
+                }
+                if (count($rows) < 100) {
+                    break;
+                }
+            }
+
+            if ($pickedOrder !== '') {
+                Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                    ['meta_key' => $cacheKey],
+                    ['meta_value' => json_encode(['order_id' => $pickedOrder, 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+                );
+                $this->logger->log('INFO', 'resolved_order_id_from_server', [
+                    'server_id' => $serverId,
+                    'order_id' => $pickedOrder,
+                    'ip' => $pickedIp,
+                ]);
+                return $pickedOrder;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'resolve_order_id_from_server_failed', [
+                'server_id' => $serverId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => $cacheKey],
+            ['meta_value' => json_encode(['order_id' => '', 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
         );
         return '';
     }

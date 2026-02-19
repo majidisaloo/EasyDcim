@@ -459,7 +459,19 @@ final class AdminController
                 $mappedServiceIds[$sid] = true;
             }
         }
-        $unassigned = array_values(array_filter($easyServices, static fn (array $item): bool => !isset($mappedServiceIds[(string) ($item['service_id'] ?? '')])));
+        $unassigned = array_values(array_filter($easyServices, static function (array $item) use ($mappedServiceIds): bool {
+            $serviceId = trim((string) ($item['service_id'] ?? ''));
+            $serverId = trim((string) ($item['server_id'] ?? ''));
+            $ip = trim((string) ($item['ip'] ?? ''));
+            $orderId = trim((string) ($item['order_id'] ?? ''));
+            if ($serviceId === '' && $serverId === '' && $ip === '' && $orderId === '') {
+                return false;
+            }
+            if ($serviceId !== '' && isset($mappedServiceIds[$serviceId])) {
+                return false;
+            }
+            return true;
+        }));
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_tab_title')) . '</h3>';
@@ -517,17 +529,18 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_unassigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
         foreach ($unassigned as $item) {
             echo '<tr>';
             echo '<td>' . htmlspecialchars((string) ($item['service_id'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['server_id'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['ip'] ?? '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($item['order_id'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['status'] ?? '-')) . '</td>';
             echo '</tr>';
         }
         if (empty($unassigned)) {
-            echo '<tr><td colspan="4">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+            echo '<tr><td colspan="5">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
         echo '</div>';
@@ -2522,7 +2535,22 @@ final class AdminController
                 'is_up' => $isUp,
             ];
         }
-        return $normalized;
+        $clean = [];
+        foreach ($normalized as $item) {
+            $serviceId = trim((string) ($item['service_id'] ?? ''));
+            $serverId = trim((string) ($item['server_id'] ?? ''));
+            $orderId = trim((string) ($item['order_id'] ?? ''));
+            $ip = trim((string) ($item['ip'] ?? ''));
+            $status = strtolower(trim((string) ($item['status'] ?? '')));
+            if ($serviceId === '' && $serverId === '' && $orderId === '' && $ip === '') {
+                continue;
+            }
+            if ($serviceId !== '' && $serverId === '' && $orderId === '' && $ip === '' && in_array($status, ['accepted', 'pending', 'rejected'], true)) {
+                continue;
+            }
+            $clean[] = $item;
+        }
+        return $clean;
     }
 
     private function extractEasyClientIdentity(array $row): array

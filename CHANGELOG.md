@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.50] - 2026-02-19
+### Fixed
+- Unassigned Services table now filters out malformed/empty API rows to prevent random blank rows and unstable display.
+- Rows that only contain `service_id` with transient statuses (`accepted/pending/rejected`) and no other identifiers are excluded from unassigned list.
+### Changed
+- Unassigned Services table now includes `Order ID` column for better traceability.
+
 ## [1.49] - 2026-02-19
 ### Added
 - Added cross-system client identity comparison (WHMCS vs EasyDCIM) in `Important Warnings`.

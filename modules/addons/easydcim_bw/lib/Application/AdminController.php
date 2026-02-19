@@ -609,7 +609,9 @@ final class AdminController
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_empty_hint')) . '</div>';
             }
             echo '<script>(function(){'
-                . 'var running=' . ($runningNow ? 'true' : 'false') . ';var timer=null;'
+                . 'var initTotal=' . (int) ($testAllState['total'] ?? 0) . ';'
+                . 'var initDone=' . (int) ($testAllState['done'] ?? 0) . ';'
+                . 'var running=' . ($runningNow ? 'true' : 'false') . ' || (initTotal>initDone);var timer=null;'
                 . 'var formTest=document.getElementById("edbw-test-all-form");'
                 . 'var formCont=document.getElementById("edbw-test-all-continue-form");'
                 . 'var formStop=document.getElementById("edbw-test-all-stop-form");'
@@ -661,7 +663,8 @@ final class AdminController
                 . 'bindReload(formReset);'
                 . 'bindReload(formRefresh);'
                 . 'setRunning(running);'
-                . 'if(running){timer=setTimeout(tick,1000);}'
+                . 'if(!running && initTotal>initDone){running=true;setRunning(true);}'
+                . 'if(running){timer=setTimeout(tick,700);}'
                 . '})();</script>';
         }
         echo '</div>';

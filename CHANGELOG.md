@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.80] - 2026-02-19
+### Fixed
+- Servers batch runner now auto-resumes reliably on page load when progress state exists (`done < total`) even if stale `running` flag is false.
+- Restores queue controls and continues polling, preventing freeze at early progress states like `1/163`.
+
 ## [1.79] - 2026-02-19
 ### Fixed
 - Added final fail-safe for service test: if HTTP `422` occurs but `order_id` exists, test is downgraded to `order_id_only` instead of hard failure.

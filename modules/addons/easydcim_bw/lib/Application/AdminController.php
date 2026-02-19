@@ -604,19 +604,17 @@ final class AdminController
             }
         }
 
-        if (empty($merged)) {
-            $orders = $this->fetchEasyServicesFromAdminOrders($client);
-            foreach ($orders as $item) {
-                $k = trim((string) ($item['service_id'] ?? ''));
-                if ($k === '') {
-                    $k = 'o:' . trim((string) ($item['order_id'] ?? ''));
-                }
-                if ($k === '' || isset($seen[$k])) {
-                    continue;
-                }
-                $seen[$k] = true;
-                $merged[] = $item;
+        $orders = $this->fetchEasyServicesFromAdminOrders($client);
+        foreach ($orders as $item) {
+            $k = trim((string) ($item['service_id'] ?? ''));
+            if ($k === '') {
+                $k = 'o:' . trim((string) ($item['order_id'] ?? ''));
             }
+            if ($k === '' || isset($seen[$k])) {
+                continue;
+            }
+            $seen[$k] = true;
+            $merged[] = $item;
         }
 
         return $merged;
@@ -908,7 +906,7 @@ final class AdminController
                 continue;
             }
             if ($field === 'easydcim_service_id') {
-                $level = $configured === $totalScoped ? 'ok' : ($configured > 0 ? 'warn' : 'warn');
+                $level = 'ok';
                 $detail = $configured . '/' . $totalScoped . ' ' . ($this->isFa ? 'محصول در محدوده تنظیم شده' : 'scoped products configured') . ' (' . $this->t('hc_optional') . ')';
             } else {
                 $level = $configured === $totalScoped ? 'ok' : ($configured > 0 ? 'warn' : 'fail');
@@ -1253,7 +1251,7 @@ final class AdminController
                 $mode = 'service_id';
                 $response = $client->ports($resolvedServiceId, true, $email, false);
                 $codeFirst = (int) ($response['http_code'] ?? 0);
-                if ($codeFirst === 401 || $codeFirst === 403) {
+                if (($codeFirst === 401 || $codeFirst === 403) && $this->settings->getBool('use_impersonation', false)) {
                     $fallbackClient = new EasyDcimClient(
                         $baseUrl,
                         $token,
@@ -1268,6 +1266,19 @@ final class AdminController
                         $mode = 'service_id_fallback_no_impersonation';
                     }
                 }
+                $codeAfterService = (int) ($response['http_code'] ?? 0);
+                $resolvedServerId = trim((string) ($target['easydcim_server_id'] ?? ''));
+                if (($codeAfterService === 401 || $codeAfterService === 403 || $codeAfterService === 422) && $resolvedServerId !== '') {
+                    $serverResp = $client->portsByServer($resolvedServerId, true, $email);
+                    $codeServer = (int) ($serverResp['http_code'] ?? 0);
+                    if ($codeServer >= 200 && $codeServer < 300) {
+                        $response = $serverResp;
+                        $mode = 'server_id_ports';
+                    }
+                }
+            } elseif (trim((string) ($target['easydcim_server_id'] ?? '')) !== '') {
+                $mode = 'server_id_only';
+                $response = $client->portsByServer(trim((string) $target['easydcim_server_id']), true, $email);
             }
             $code = (int) ($response['http_code'] ?? 0);
             $err = trim((string) ($response['error'] ?? ''));
@@ -1292,11 +1303,14 @@ final class AdminController
                 $networkTraffic += (float) ($p['traffic_total'] ?? 0.0);
             }
 
-            if ($mode === 'none' && $err === '') {
+            if (($mode === 'none' || $mode === 'server_id_only') && $err === '') {
                 $err = $this->isFa ? 'Service ID از روی Order ID پیدا نشد' : 'Service ID was not resolved from order';
                 $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $err . ')';
             } elseif (($code === 401 || $code === 403) && $err === '') {
                 $err = $this->isFa ? 'عدم دسترسی به endpoint پورت‌ها با توکن/حالت فعلی' : 'Access denied for ports endpoint with current token/mode';
+                $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $err . ')';
+            } elseif ($code === 422 && $err === '') {
+                $err = $this->isFa ? 'Service ID معتبر نیست یا برای endpoint پورت‌ها قابل استفاده نیست' : 'Service ID is not valid for ports endpoint';
                 $statusText = $this->t('test_failed') . ' (HTTP ' . $code . ', ' . $err . ')';
             } elseif ($ok) {
                 if ($networkPorts > 0) {
@@ -2226,11 +2240,23 @@ final class AdminController
         if ($orderId === '') {
             return '';
         }
+        $cacheKey = 'order_service_map_' . $orderId;
+        $cachedRaw = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', $cacheKey)->value('meta_value');
+        if ($cachedRaw !== '') {
+            $cached = json_decode($cachedRaw, true);
+            if (is_array($cached) && isset($cached['checked_at'], $cached['service_id']) && strtotime((string) $cached['checked_at']) > time() - 1800) {
+                return trim((string) $cached['service_id']);
+            }
+        }
         try {
             $details = $client->orderDetails($orderId);
             $data = (array) ($details['data'] ?? []);
             $id = $this->findServiceIdRecursive($data);
             if ($id !== '') {
+                Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                    ['meta_key' => $cacheKey],
+                    ['meta_value' => json_encode(['service_id' => $id, 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+                );
                 $this->logger->log('INFO', 'resolved_service_id_from_order', [
                     'order_id' => $orderId,
                     'service_id' => $id,
@@ -2266,6 +2292,10 @@ final class AdminController
                         'http_code' => (int) ($resp['http_code'] ?? 0),
                         'page' => $page,
                     ]);
+                    Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                        ['meta_key' => $cacheKey],
+                        ['meta_value' => json_encode(['service_id' => $sid, 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+                    );
                     return $sid;
                 }
                 if (count($items) < 100) {
@@ -2280,6 +2310,10 @@ final class AdminController
         }
 
         $this->logger->log('WARNING', 'resolve_service_id_from_order_empty', ['order_id' => $orderId]);
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => $cacheKey],
+            ['meta_value' => json_encode(['service_id' => '', 'checked_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+        );
         return '';
     }
 
@@ -2317,7 +2351,12 @@ final class AdminController
         } elseif (array_keys($payload) === range(0, count($payload) - 1)) {
             $items = $payload;
         } else {
-            $items = [$payload];
+            // Avoid treating API error objects as one fake port row.
+            if (isset($payload['id']) || isset($payload['name']) || isset($payload['label']) || isset($payload['port'])) {
+                $items = [$payload];
+            } else {
+                $items = [];
+            }
         }
 
         $out = [];

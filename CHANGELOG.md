@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.44] - 2026-02-19
+### Fixed
+- Added persistent `order_id -> service_id` cache (including negative cache) to avoid repeated heavy resolution calls for unresolved orders like `342`.
+- `Servers -> Test` now falls back to `server_id` port lookup when service-based lookup is denied/invalid (`401/403/422`) and server mapping exists.
+- Prevented false port counts from API error payloads (error objects are no longer interpreted as one fake port row).
+### Changed
+- EasyDCIM list cache now always merges admin-order sourced items, not only when direct client list is empty.
+
 ## [1.43] - 2026-02-19
 ### Fixed
 - `Servers -> Test` no longer throws hard exception on `403/401` for `client/services/{id}/ports`; response is handled gracefully with explicit permission message.

@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.23] - 2026-02-19
+### Fixed
+- In scope plan editor, checking `Unlimited` now immediately clears the paired quota input value and disables it.
+- EasyDCIM proxy form no longer blocks save/test when proxy is disabled (proxy port/browser validation conflict removed).
+### Changed
+- Proxy fields now auto-toggle UI state: when proxy is off, related fields are disabled and grayed out; when on, they re-enable.
+
 ## [1.22] - 2026-02-19
 ### Fixed
 - Scope plan saving flow hardened: auto-save now posts through standard `save_product_plan` action with AJAX flag, avoiding route/token mismatch issues in some WHMCS environments.

@@ -44,6 +44,47 @@ final class AdminController
         $ajax = $this->isAjaxRequest();
         $flash = [];
 
+        if ($api === 'servers_batch') {
+            $op = (string) ($_REQUEST['op'] ?? 'status');
+            try {
+                if ($op === 'test') {
+                    $result = $this->testAllServices();
+                    $this->json($this->buildBatchAjaxPayload($result));
+                    return;
+                }
+                if ($op === 'reset') {
+                    $result = $this->resetTestAllServices();
+                    $this->json($this->buildBatchAjaxPayload($result));
+                    return;
+                }
+                if ($op === 'stop') {
+                    $result = $this->stopTestAllServices();
+                    $this->json($this->buildBatchAjaxPayload($result));
+                    return;
+                }
+                if ($op === 'refresh') {
+                    $result = $this->refreshServersCacheNow();
+                    $this->json($this->buildBatchAjaxPayload($result));
+                    return;
+                }
+                $this->json($this->buildBatchAjaxPayload([
+                    'type' => 'info',
+                    'text' => '',
+                    'silent' => true,
+                ]));
+                return;
+            } catch (\Throwable $e) {
+                $this->logger->log('ERROR', 'servers_batch_api_failed', ['op' => $op, 'error' => $e->getMessage()]);
+                $this->json([
+                    'type' => 'danger',
+                    'message' => $this->t('servers_test_all_failed') . ': ' . $e->getMessage(),
+                    'silent' => false,
+                    'state' => $this->buildBatchStatePayload(),
+                ]);
+                return;
+            }
+        }
+
         if ($api === 'purchase_logs') {
             $this->json($this->getPurchaseLogs(300));
             return;
@@ -544,9 +585,13 @@ final class AdminController
                 . 'var formRefresh=document.getElementById("edbw-refresh-cache-form");'
                 . 'var progress=document.getElementById("edbw-test-all-progress");'
                 . 'var status=document.getElementById("edbw-test-all-status");'
-                . 'function post(action){'
-                . 'var fd=new FormData();fd.append("tab","servers");fd.append("action",action);fd.append("ajax","1");'
-                . 'return fetch(window.location.pathname + window.location.search,{method:"POST",body:fd,credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest"}}).then(function(r){return r.json();});}'
+                . 'var q=new URLSearchParams(window.location.search);q.set("module","easydcim_bw");q.set("tab","servers");q.set("api","servers_batch");'
+                . 'var apiUrl=window.location.pathname+"?"+q.toString();'
+                . 'function post(op){'
+                . 'var fd=new FormData();fd.append("op",op);fd.append("ajax","1");'
+                . 'return fetch(apiUrl,{method:"POST",body:fd,credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest"}})'
+                . '.then(function(r){return r.text();})'
+                . '.then(function(txt){try{return JSON.parse(txt);}catch(e){return {type:"danger",message:"' . addslashes($this->t('servers_test_all_failed')) . '",raw:txt,state:{running:false,total:0,done:0,ok:0,warn:0,fail:0,remaining:0}};}});}'
                 . 'function setRunning(v){running=!!v;'
                 . 'if(formCont){formCont.style.display=running?"":"none";}'
                 . 'if(formStop){formStop.style.display=running?"":"none";}'
@@ -554,7 +599,7 @@ final class AdminController
                 . '}'
                 . 'function render(payload){'
                 . 'if(!payload){return;}'
-                . 'if(status && payload.message){status.textContent=payload.message;status.style.color=(payload.type==="danger"?"#b91c1c":(payload.type==="warning"?"#b45309":"#0f766e"));}'
+                . 'if(status && payload.message && !payload.silent){status.textContent=payload.message;status.style.color=(payload.type==="danger"?"#b91c1c":(payload.type==="warning"?"#b45309":"#0f766e"));}'
                 . 'if(payload.state && progress){'
                 . 'if(payload.state.running){progress.style.display="block";progress.textContent="' . addslashes($this->t('servers_test_all_progress')) . ': "+payload.state.done+"/"+payload.state.total+" (OK: "+payload.state.ok+", WARN: "+payload.state.warn+", FAIL: "+payload.state.fail+")";}'
                 . 'else{progress.style.display="none";}'
@@ -562,15 +607,15 @@ final class AdminController
                 . 'setRunning(payload.state && payload.state.running);'
                 . '}'
                 . 'function tick(){if(!running){return;}'
-                . 'post("test_all_services").then(function(j){render(j);if(j && j.state && j.state.running && running){timer=setTimeout(tick,1000);}else{running=false;}}).catch(function(){running=false;if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});}'
-                . 'function bind(form,action,loop){if(!form){return;}form.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}'
-                . 'if(action==="stop_test_all_services"||action==="reset_test_all_services"){running=false;}'
-                . 'post(action).then(function(j){render(j);if(loop && j && j.state && j.state.running){running=true;tick();}}).catch(function(){if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});});}'
-                . 'bind(formTest,"test_all_services",true);'
-                . 'bind(formCont,"test_all_services",true);'
-                . 'bind(formStop,"stop_test_all_services",false);'
-                . 'bind(formReset,"reset_test_all_services",false);'
-                . 'bind(formRefresh,"refresh_servers_cache",false);'
+                . 'post("test").then(function(j){render(j);if(j && j.state && j.state.running && running){timer=setTimeout(tick,1000);}else{running=false;}}).catch(function(){running=false;if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});}'
+                . 'function bind(form,op,loop){if(!form){return;}form.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}'
+                . 'if(op==="stop"||op==="reset"){running=false;}'
+                . 'post(op).then(function(j){render(j);if(loop && j && j.state && j.state.running){running=true;tick();}}).catch(function(){if(status){status.textContent="' . addslashes($this->t('servers_test_all_failed')) . '";status.style.color="#b91c1c";}});});}'
+                . 'bind(formTest,"test",true);'
+                . 'bind(formCont,"test",true);'
+                . 'bind(formStop,"stop",false);'
+                . 'bind(formReset,"reset",false);'
+                . 'bind(formRefresh,"refresh",false);'
                 . '})();</script>';
         }
         echo '</div>';
@@ -2111,21 +2156,26 @@ final class AdminController
 
     private function buildBatchAjaxPayload(array $result): array
     {
-        $state = $this->getTestAllState();
-        $running = (int) ($state['remaining'] ?? 0) > 0;
+        $state = $this->buildBatchStatePayload();
         return [
             'type' => (string) ($result['type'] ?? 'info'),
             'message' => (string) ($result['text'] ?? ''),
             'silent' => (bool) ($result['silent'] ?? false),
-            'state' => [
-                'total' => (int) ($state['total'] ?? 0),
-                'done' => (int) ($state['done'] ?? 0),
-                'ok' => (int) ($state['ok'] ?? 0),
-                'warn' => (int) ($state['warn'] ?? 0),
-                'fail' => (int) ($state['fail'] ?? 0),
-                'remaining' => (int) ($state['remaining'] ?? 0),
-                'running' => $running,
-            ],
+            'state' => $state,
+        ];
+    }
+
+    private function buildBatchStatePayload(): array
+    {
+        $state = $this->getTestAllState();
+        return [
+            'total' => (int) ($state['total'] ?? 0),
+            'done' => (int) ($state['done'] ?? 0),
+            'ok' => (int) ($state['ok'] ?? 0),
+            'warn' => (int) ($state['warn'] ?? 0),
+            'fail' => (int) ($state['fail'] ?? 0),
+            'remaining' => (int) ($state['remaining'] ?? 0),
+            'running' => (int) ($state['remaining'] ?? 0) > 0,
         ];
     }
 

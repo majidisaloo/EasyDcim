@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.64] - 2026-02-19
+### Fixed
+- Reworked `Servers` batch-test AJAX to use a dedicated lightweight endpoint (`api=servers_batch`) so `Test All` no longer fails with generic `All services test failed`.
+- Added robust JSON parsing fallback in browser-side batch calls to avoid hard failure on unexpected response bodies.
+### Changed
+- Batch operations (`test`, `continue`, `stop`, `reset`, `refresh cache`) now run through one consistent AJAX API path.
+
 ## [1.63] - 2026-02-19
 ### Added
 - Ports status now shows per-port lines with visual state dots:

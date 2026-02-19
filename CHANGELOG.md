@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.60] - 2026-02-19
+### Fixed
+- Removed duplicate bulk-progress notice in Servers tab by suppressing top flash when queue is in-progress.
+- Added explicit `Stop` action for bulk test queue; stopping now clears queue state cleanly.
+### Changed
+- Queue controls now behave as:
+  - Active queue: `Continue`, `Stop`, `Reset`
+  - Stopped/completed queue: only `Test All`
+- Auto-continue timer in bulk test flow set to 1 second for smoother sequential execution.
+- Updated action labels to reflect one-by-one continuation (`Continue (1 by 1)` / `ادامه تست (تکی)`).
+
 ## [1.59] - 2026-02-19
 ### Performance
 - `Test All` now runs strictly one service per request (`chunkSize=1`) for smoother server load.

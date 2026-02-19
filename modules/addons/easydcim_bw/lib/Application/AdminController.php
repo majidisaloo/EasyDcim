@@ -129,11 +129,18 @@ final class AdminController
             $tab = 'servers';
         }
         if ($action === 'test_all_services') {
-            $flash[] = $this->testAllServices();
+            $result = $this->testAllServices();
+            if (!($result['silent'] ?? false)) {
+                $flash[] = $result;
+            }
             $tab = 'servers';
         }
         if ($action === 'reset_test_all_services') {
             $flash[] = $this->resetTestAllServices();
+            $tab = 'servers';
+        }
+        if ($action === 'stop_test_all_services') {
+            $flash[] = $this->stopTestAllServices();
             $tab = 'servers';
         }
 
@@ -513,6 +520,11 @@ final class AdminController
                 echo '</form>';
                 echo '<form method="post" class="edbw-form-inline edbw-action-card">';
                 echo '<input type="hidden" name="tab" value="servers">';
+                echo '<input type="hidden" name="action" value="stop_test_all_services">';
+                echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_stop')) . '</button>';
+                echo '</form>';
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<input type="hidden" name="tab" value="servers">';
                 echo '<input type="hidden" name="action" value="reset_test_all_services">';
                 echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_reset')) . '</button>';
                 echo '</form>';
@@ -525,7 +537,7 @@ final class AdminController
                     $nextUrl = 'addonmodules.php?module=easydcim_bw&tab=servers&action=test_all_services&autobatch=1';
                     echo '<meta http-equiv="refresh" content="1;url=' . htmlspecialchars($nextUrl) . '">';
                 } else {
-                    echo '<script>(function(){var f=document.getElementById("edbw-test-all-continue-form");if(!f){return;}setTimeout(function(){try{f.submit();}catch(e){}},900);})();</script>';
+                    echo '<script>(function(){var f=document.getElementById("edbw-test-all-continue-form");if(!f){return;}setTimeout(function(){try{f.submit();}catch(e){}},1000);})();</script>';
                 }
             }
             echo '</div>';
@@ -2511,6 +2523,7 @@ final class AdminController
             if (!empty($remaining)) {
                 return [
                     'type' => 'info',
+                    'silent' => true,
                     'text' => $this->t('servers_test_all_progress') . ': '
                         . (int) ($state['done'] ?? 0) . '/' . (int) ($state['total'] ?? 0)
                         . ' (OK: ' . (int) ($state['ok'] ?? 0)
@@ -2567,6 +2580,12 @@ final class AdminController
     {
         $this->clearTestAllState();
         return ['type' => 'success', 'text' => $this->t('servers_test_all_reset_done')];
+    }
+
+    private function stopTestAllServices(): array
+    {
+        $this->clearTestAllState();
+        return ['type' => 'success', 'text' => $this->t('servers_test_all_stopped')];
     }
 
     private function getScopedClientEmails(int $limit = 40): array
@@ -3382,7 +3401,9 @@ final class AdminController
             'servers_cache_at' => 'آخرین به‌روزرسانی کش سرورها',
             'servers_refresh_cache' => 'کش و تکمیل شناسه‌ها',
             'servers_test_all' => 'تست همه',
-            'servers_test_all_continue' => 'ادامه تست (۵تایی)',
+            'servers_test_all_continue' => 'ادامه تست (تکی)',
+            'servers_test_all_stop' => 'توقف تست',
+            'servers_test_all_stopped' => 'تست گروهی متوقف شد',
             'servers_test_all_reset' => 'ریست صف تست',
             'servers_test_all_reset_done' => 'صف تست همه سرویس‌ها ریست شد',
             'servers_test_all_progress' => 'پیشرفت تست گروهی',
@@ -3581,7 +3602,9 @@ final class AdminController
             'servers_cache_at' => 'Servers cache last update',
             'servers_refresh_cache' => 'Refresh Cache + Complete IDs',
             'servers_test_all' => 'Test All',
-            'servers_test_all_continue' => 'Continue (Batch of 5)',
+            'servers_test_all_continue' => 'Continue (1 by 1)',
+            'servers_test_all_stop' => 'Stop',
+            'servers_test_all_stopped' => 'Bulk test stopped',
             'servers_test_all_reset' => 'Reset Test Queue',
             'servers_test_all_reset_done' => 'Test-all queue has been reset',
             'servers_test_all_progress' => 'Batch test progress',

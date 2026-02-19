@@ -224,7 +224,7 @@ final class AdminController
         echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="tab" value="settings">';
         echo '<input type="hidden" name="action" value="save_settings">';
-        echo '<div class="edbw-form-inline"><label>Module Enabled</label><input type="checkbox" name="module_enabled" value="1" ' . ($s->getBool('module_enabled', true) ? 'checked' : '') . '><span class="edbw-help">Disable temporarily without losing data.</span></div>';
+        echo '<div class="edbw-form-inline"><label>Module Status</label><select name="module_enabled"><option value="1"' . ((string) $s->getString('module_enabled', '1') === '1' ? ' selected' : '') . '>Active</option><option value="0"' . ((string) $s->getString('module_enabled', '1') === '0' ? ' selected' : '') . '>Disable</option></select><span class="edbw-help">Disable temporarily without losing data.</span></div>';
         echo '<div class="edbw-form-inline"><label>UI Language</label><select name="ui_language"><option value="auto"' . ($s->getString('ui_language', 'auto') === 'auto' ? ' selected' : '') . '>Default</option><option value="english"' . ($s->getString('ui_language', 'auto') === 'english' ? ' selected' : '') . '>English</option><option value="farsi"' . ($s->getString('ui_language', 'auto') === 'farsi' ? ' selected' : '') . '>فارسی</option></select></div>';
         echo '<div class="edbw-form-inline"><label>Poll Interval (min)</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
         echo '<div class="edbw-form-inline"><label>Graph Cache (min)</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
@@ -260,7 +260,6 @@ final class AdminController
         echo '<h3>EasyDCIM Connection</h3>';
         echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="tab" value="connection">';
-        echo '<input type="hidden" name="action" value="save_connection">';
         echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="70"></div>';
         echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="70"></div>';
         echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation', false) ? 'checked' : '') . '></div>';
@@ -271,13 +270,10 @@ final class AdminController
         echo '<div class="edbw-form-inline"><label>Proxy Port</label><input type="number" min="1" name="proxy_port" value="' . (int) $s->getInt('proxy_port', 0) . '"></div>';
         echo '<div class="edbw-form-inline"><label>Proxy Username</label><input type="text" name="proxy_username" value="' . htmlspecialchars($s->getString('proxy_username')) . '"></div>';
         echo '<div class="edbw-form-inline"><label>Proxy Password</label><input type="password" name="proxy_password" value="" placeholder="Leave empty to keep current password"></div>';
-        echo '<button class="btn btn-primary" type="submit">Save Connection</button>';
-        echo '</form>';
-
-        echo '<form method="post" class="edbw-form-inline">';
-        echo '<input type="hidden" name="tab" value="connection">';
-        echo '<input type="hidden" name="action" value="test_easydcim">';
-        echo '<button class="btn btn-default" type="submit">Test EasyDCIM Connection</button>';
+        echo '<div class="edbw-actions">';
+        echo '<button class="btn btn-primary" type="submit" name="action" value="save_connection">Save Connection</button>';
+        echo '<button class="btn btn-default" type="submit" name="action" value="test_easydcim">Test EasyDCIM Connection</button>';
+        echo '</div>';
         echo '</form>';
         echo '</div>';
     }
@@ -357,10 +353,11 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>Plan Quotas (IN / OUT / TOTAL)</h3>';
+        echo '<p class="edbw-help">Rows auto-save on change. You can still use Save Scope above for PID/GID updates.</p>';
         echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>Product</th><th>GID</th><th>CF Check</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>Unlimited IN/OUT/TOTAL</th><th>Mode</th><th>Action</th><th>Save</th></tr></thead><tbody>';
+        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>Product</th><th>GID</th><th>CF Check</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>Unlimited IN/OUT/TOTAL</th><th>Action</th></tr></thead><tbody>';
         foreach ($scopedProducts as $row) {
-            echo '<tr><form method="post">';
+            echo '<tr><form method="post" class="edbw-auto-plan">';
             echo '<input type="hidden" name="tab" value="scope">';
             echo '<input type="hidden" name="action" value="save_product_plan">';
             echo '<input type="hidden" name="pd_pid" value="' . (int) $row['pid'] . '">';
@@ -369,21 +366,20 @@ final class AdminController
             echo '<td>' . (int) $row['gid'] . '</td>';
             $cfStatus = (($row['cf_service'] ? 'S' : '-') . '/' . ($row['cf_order'] ? 'O' : '-') . '/' . ($row['cf_server'] ? 'V' : '-'));
             echo '<td>' . htmlspecialchars($cfStatus) . '</td>';
-            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_in_gb" value="' . htmlspecialchars((string) $row['quota_in']) . '"></td>';
-            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_out_gb" value="' . htmlspecialchars((string) $row['quota_out']) . '"></td>';
-            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_total_gb" value="' . htmlspecialchars((string) $row['quota_total']) . '"></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_in_gb" value="' . htmlspecialchars((string) $row['quota_in']) . '"' . ($row['unlimited_in'] ? ' disabled' : '') . '></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_out_gb" value="' . htmlspecialchars((string) $row['quota_out']) . '"' . ($row['unlimited_out'] ? ' disabled' : '') . '></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_total_gb" value="' . htmlspecialchars((string) $row['quota_total']) . '"' . ($row['unlimited_total'] ? ' disabled' : '') . '></td>';
             echo '<td>';
-            echo '<label>IN <input type="checkbox" name="pd_unlimited_in" value="1" ' . ($row['unlimited_in'] ? 'checked' : '') . '></label> ';
-            echo '<label>OUT <input type="checkbox" name="pd_unlimited_out" value="1" ' . ($row['unlimited_out'] ? 'checked' : '') . '></label> ';
-            echo '<label>TOTAL <input type="checkbox" name="pd_unlimited_total" value="1" ' . ($row['unlimited_total'] ? 'checked' : '') . '></label>';
+            echo '<label>IN <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_in_gb" name="pd_unlimited_in" value="1" ' . ($row['unlimited_in'] ? 'checked' : '') . '></label> ';
+            echo '<label>OUT <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_out_gb" name="pd_unlimited_out" value="1" ' . ($row['unlimited_out'] ? 'checked' : '') . '></label> ';
+            echo '<label>TOTAL <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_total_gb" name="pd_unlimited_total" value="1" ' . ($row['unlimited_total'] ? 'checked' : '') . '></label>';
             echo '</td>';
-            echo '<td><select name="pd_mode"><option value="IN"' . ($row['mode'] === 'IN' ? ' selected' : '') . '>IN</option><option value="OUT"' . ($row['mode'] === 'OUT' ? ' selected' : '') . '>OUT</option><option value="TOTAL"' . ($row['mode'] === 'TOTAL' ? ' selected' : '') . '>TOTAL</option></select></td>';
             echo '<td><select name="pd_action"><option value="disable_ports"' . ($row['action'] === 'disable_ports' ? ' selected' : '') . '>Disable Ports</option><option value="suspend"' . ($row['action'] === 'suspend' ? ' selected' : '') . '>Suspend</option><option value="both"' . ($row['action'] === 'both' ? ' selected' : '') . '>Both</option></select></td>';
-            echo '<td><button class="btn btn-default" type="submit">Save</button></td>';
             echo '</form></tr>';
         }
         echo '</tbody></table>';
         echo '</div>';
+        echo '<script>(function(){var forms=document.querySelectorAll(".edbw-auto-plan");forms.forEach(function(f){var t;f.querySelectorAll("input,select").forEach(function(el){el.addEventListener("change",function(){if(el.classList.contains("edbw-limit-toggle")){var target=f.querySelector("[name=\\"" + el.getAttribute("data-target") + "\\"]");if(target){target.disabled=el.checked;}}clearTimeout(t);t=setTimeout(function(){f.submit();},350);});});});})();</script>';
         echo '</div>';
     }
 
@@ -556,7 +552,7 @@ final class AdminController
             'proxy_enabled', 'proxy_type', 'proxy_host', 'proxy_port', 'proxy_username',
         ];
         $allowed = $action === 'save_connection' ? $allowedConnection : $allowedGeneral;
-        $boolKeys = ['module_enabled', 'use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode', 'proxy_enabled'];
+        $boolKeys = ['use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode', 'proxy_enabled'];
 
         foreach ($allowed as $key) {
             if (in_array($key, $boolKeys, true)) {
@@ -704,13 +700,14 @@ final class AdminController
                 return ['type' => 'danger', 'text' => 'Invalid PID.'];
             }
 
-            $mode = strtoupper(trim((string) ($_POST['pd_mode'] ?? 'TOTAL')));
-            if (!in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
-                $mode = 'TOTAL';
-            }
             $action = trim((string) ($_POST['pd_action'] ?? 'disable_ports'));
             if (!in_array($action, ['disable_ports', 'suspend', 'both'], true)) {
                 $action = 'disable_ports';
+            }
+            $row = Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('pid', $pid)->first();
+            $mode = $row ? (string) ($row->default_mode ?? 'TOTAL') : strtoupper($this->settings->getString('default_calculation_mode', 'TOTAL'));
+            if (!in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
+                $mode = 'TOTAL';
             }
 
             $data = [
@@ -729,7 +726,6 @@ final class AdminController
                 'created_at' => date('Y-m-d H:i:s'),
             ];
 
-            $row = Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('pid', $pid)->first();
             if ($row) {
                 Capsule::table('mod_easydcim_bw_guard_product_defaults')->where('id', (int) $row->id)->update($data);
             } else {
@@ -1124,18 +1120,18 @@ final class AdminController
         $fa = [
             'subtitle' => 'مرکز کنترل ترافیک سرویس‌های EasyDCIM',
             'tab_dashboard' => 'داشبورد',
-            'tab_connection' => 'اتصال',
+            'tab_connection' => 'Easy DCIM',
             'tab_settings' => 'تنظیمات',
-            'tab_scope' => 'اسکوپ',
+            'tab_scope' => 'سرویس/گروه',
             'tab_packages' => 'پکیج‌ها',
             'tab_logs' => 'لاگ‌ها',
         ];
         $en = [
             'subtitle' => 'Bandwidth control center for EasyDCIM services',
             'tab_dashboard' => 'Dashboard',
-            'tab_connection' => 'Connection',
+            'tab_connection' => 'Easy DCIM',
             'tab_settings' => 'Settings',
-            'tab_scope' => 'Scope',
+            'tab_scope' => 'Services / Group',
             'tab_packages' => 'Packages',
             'tab_logs' => 'Logs',
         ];

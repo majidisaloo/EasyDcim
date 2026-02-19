@@ -144,6 +144,7 @@
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  margin-top: 8px;
 }
 
 .edbw-form-inline {
@@ -219,6 +220,17 @@
   border-color: #cbd5e1;
 }
 
+.edbw-table-wrap input[type="number"],
+.edbw-table-wrap select {
+  min-width: 110px;
+  width: 100%;
+}
+
+.edbw-table-wrap label {
+  font-size: 12px;
+  margin-right: 6px;
+}
+
 @media (max-width: 900px) {
   .edbw-form-inline label {
     min-width: 100%;
@@ -226,5 +238,10 @@
 
   .edbw-card-value {
     font-size: 16px;
+  }
+
+  .edbw-table-wrap input[type="number"],
+  .edbw-table-wrap select {
+    min-width: 90px;
   }
 }

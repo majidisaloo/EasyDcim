@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.20] - 2026-02-19
+### Added
+- Renamed tabs to `Easy DCIM` and `Services / Group` for clearer navigation.
+- New module runtime status field in WHMCS admin service page showing traffic-limited vs normal active state.
+- Auto-save behavior in Services/Group plan rows (saves on change) and unlimited checkboxes now disable their paired quota inputs.
+### Changed
+- EasyDCIM connection actions are now grouped together; connection test can run from the same section without a separate save flow.
+- Module enabled control switched to dropdown (`Active` / `Disable`) for explicit temporary toggling.
+- Services/Group plan table simplified by removing per-row mode selector (global mode setting is authoritative).
+- Minor responsive/admin style cleanup for tighter table/form layout.
+
 ## [1.19] - 2026-02-19
 ### Added
 - New dedicated `Connection` tab for EasyDCIM settings and connectivity tests.

@@ -63,8 +63,19 @@ add_hook('AdminServicesTabFields', 1, static function (array $vars): array {
     }
 
     $override = Capsule::table('mod_easydcim_bw_guard_service_overrides')->where('serviceid', $serviceId)->first();
+    $state = Capsule::table('mod_easydcim_bw_guard_service_state')->where('serviceid', $serviceId)->first();
+    $runtime = 'No data';
+    if ($state) {
+        $status = (string) ($state->last_status ?? 'ok');
+        if ($status === 'limited') {
+            $runtime = 'Active - Traffic limited (ports disabled/suspended by policy)';
+        } else {
+            $runtime = 'Active - Normal';
+        }
+    }
 
     return [
+        'EasyDcim-BW Runtime Status' => $runtime,
         'EasyDcim-BW Override Quota (GB)' => $override ? (string) ($override->override_base_quota_gb ?? '') : '',
         'EasyDcim-BW Override Mode (IN/OUT/TOTAL)' => $override ? (string) ($override->override_mode ?? '') : '',
         'EasyDcim-BW Override Action (disable_ports/suspend/both)' => $override ? (string) ($override->override_action ?? '') : '',

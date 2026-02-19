@@ -188,6 +188,10 @@ final class AdminController
         $updateLock = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
         $releaseTag = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_latest_tag')->value('meta_value');
         $releaseAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_update_available')->value('meta_value') === '1';
+        $releaseVersion = ltrim($releaseTag, 'vV');
+        if ($releaseTag !== '' && $this->compareVersion($releaseVersion, (string) $version['module_version']) <= 0) {
+            $releaseAvailable = false;
+        }
         $checks = $this->buildHealthChecks();
         $checkMap = [];
         foreach ($checks as $row) {
@@ -199,7 +203,6 @@ final class AdminController
         $this->renderMetricCard($this->t('m_version'), (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
         $this->renderMetricCard($this->t('m_commit'), (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
         $this->renderMetricCard($this->t('m_update_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
-        $this->renderMetricCard($this->t('m_release_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M6 4h12v4H6zM5 10h14v10H5zM10 14h4"></path></svg>');
         $this->renderMetricCard($this->t('m_cron_poll'), $lastPollAt !== '' ? $lastPollAt : $this->t('m_no_data'), $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
         $this->renderMetricCard($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
         $this->renderMetricCard($this->t('m_update_lock'), $updateLock ? $this->t('m_locked') : $this->t('m_free'), $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
@@ -816,6 +819,9 @@ final class AdminController
             if (!empty($probe['ok'])) {
                 return ['type' => 'success', 'text' => $this->t('connection_ok')];
             }
+            if (!empty($probe['reachable'])) {
+                return ['type' => 'success', 'text' => $this->t('connection_reachable_limited') . ' (HTTP ' . (int) ($probe['http_code'] ?? 0) . ')'];
+            }
             $extra = trim((string) ($probe['error'] ?? ''));
             $code = (int) ($probe['http_code'] ?? 0);
             if ($extra === '' && $code > 0) {
@@ -995,6 +1001,9 @@ final class AdminController
             $ping = $client->pingInfo();
             if (!empty($ping['ok'])) {
                 return ['text' => $this->t('m_connected'), 'state' => 'ok'];
+            }
+            if (!empty($ping['reachable'])) {
+                return ['text' => $this->t('m_configured_reachable'), 'state' => 'warn'];
             }
             return ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
         } catch (\Throwable $e) {
@@ -1771,6 +1780,7 @@ final class AdminController
             'settings_saved' => 'تنظیمات با موفقیت ذخیره شد.',
             'base_or_token_missing' => 'Base URL یا API Token وارد نشده است.',
             'connection_ok' => 'اتصال EasyDCIM صحیح است.',
+            'connection_reachable_limited' => 'اتصال برقرار است اما endpoint کلاینت محدود است',
             'connection_unhealthy' => 'EasyDCIM در دسترس است ولی پاسخ سالم نیست.',
             'connection_failed' => 'تست اتصال ناموفق بود',
             'servers_tab_title' => 'سرورها و سرویس‌های EasyDCIM',
@@ -1812,6 +1822,7 @@ final class AdminController
             'm_configured' => 'تنظیم شده',
             'm_not_configured' => 'تنظیم نشده',
             'm_connected' => 'متصل',
+            'm_configured_reachable' => 'تنظیم شده (دسترسی محدود)',
             'm_configured_disconnected' => 'تنظیم شده ولی متصل نیست',
             'm_unknown' => 'نامشخص',
             'update_actions' => 'اقدامات آپدیت',
@@ -1937,6 +1948,7 @@ final class AdminController
             'settings_saved' => 'Settings saved successfully.',
             'base_or_token_missing' => 'Base URL or API token is missing.',
             'connection_ok' => 'EasyDCIM connection is OK.',
+            'connection_reachable_limited' => 'EasyDCIM is reachable but client endpoint is restricted',
             'connection_unhealthy' => 'EasyDCIM is reachable but response is not healthy.',
             'connection_failed' => 'EasyDCIM test failed',
             'servers_tab_title' => 'EasyDCIM Servers and Services',
@@ -1978,6 +1990,7 @@ final class AdminController
             'm_configured' => 'Configured',
             'm_not_configured' => 'Not configured',
             'm_connected' => 'Connected',
+            'm_configured_reachable' => 'Configured (limited access)',
             'm_configured_disconnected' => 'Configured but disconnected',
             'm_unknown' => 'Unknown',
             'update_actions' => 'Update Actions',

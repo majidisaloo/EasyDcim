@@ -107,6 +107,7 @@ final class EasyDcimClient
         $code = (int) ($result['http_code'] ?? 0);
         return [
             'ok' => $code >= 200 && $code < 300,
+            'reachable' => ($code >= 200 && $code < 500) || trim((string) ($result['error'] ?? '')) === '',
             'http_code' => $code,
             'error' => (string) ($result['error'] ?? ''),
         ];

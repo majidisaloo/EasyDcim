@@ -2,6 +2,18 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.26] - 2026-02-19
+### Fixed
+- Removed stale commit-based update flag usage from dashboard update card (now release-state only).
+- Update state now auto-resolves to up-to-date when installed version matches latest release tag.
+### Changed
+- Removed separate release-status duplication from dashboard cards (single update status card retained).
+- EasyDCIM connection test now treats reachable-but-restricted client endpoint responses as a valid connectivity state.
+- Dashboard connection state now distinguishes:
+  - Connected
+  - Configured (limited access)
+  - Configured but disconnected
+
 ## [1.25] - 2026-02-19
 ### Fixed
 - Dashboard update-state card now follows release-update status only (removed stale commit-update flag path that could show false yellow state).

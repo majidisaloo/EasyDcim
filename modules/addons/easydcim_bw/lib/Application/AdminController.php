@@ -481,16 +481,18 @@ final class AdminController
             echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_api_loaded')) . ': ' . count($easyServices) . '</p>';
             $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_at')->value('meta_value');
             echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_cache_at')) . ': ' . htmlspecialchars($cacheAt !== '' ? $cacheAt : $this->t('m_no_data')) . '</p>';
-            echo '<form method="post" class="edbw-form-inline">';
+            echo '<div class="edbw-server-actions">';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="refresh_servers_cache">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_refresh_cache')) . '</button>';
             echo '</form>';
-            echo '<form method="post" class="edbw-form-inline">';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="test_all_services">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all')) . '</button>';
             echo '</form>';
+            echo '</div>';
             if (count($easyServices) === 0 && $cacheAt === '') {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
             } elseif (count($easyServices) === 0) {
@@ -2295,6 +2297,7 @@ final class AdminController
 
     private function persistResolvedMappings(array $services): int
     {
+        $hasServerColumn = Capsule::schema()->hasColumn('mod_easydcim_bw_guard_service_state', 'easydcim_server_id');
         $updated = 0;
         foreach ($services as $svc) {
             $whmcsServiceId = (int) ($svc['serviceid'] ?? 0);
@@ -2318,7 +2321,7 @@ final class AdminController
                 if ($orderId !== '' && trim((string) ($existing->easydcim_order_id ?? '')) !== $orderId) {
                     $changes['easydcim_order_id'] = $orderId;
                 }
-                if ($serverId !== '' && trim((string) ($existing->easydcim_server_id ?? '')) !== $serverId) {
+                if ($hasServerColumn && $serverId !== '' && trim((string) ($existing->easydcim_server_id ?? '')) !== $serverId) {
                     $changes['easydcim_server_id'] = $serverId;
                 }
                 if (!empty($changes)) {
@@ -2333,12 +2336,11 @@ final class AdminController
                 continue;
             }
 
-            Capsule::table('mod_easydcim_bw_guard_service_state')->insert([
+            $insert = [
                 'serviceid' => $whmcsServiceId,
                 'userid' => $userId,
                 'easydcim_service_id' => $serviceId,
                 'easydcim_order_id' => $orderId !== '' ? $orderId : null,
-                'easydcim_server_id' => $serverId !== '' ? $serverId : null,
                 'base_quota_gb' => 0,
                 'mode' => 'TOTAL',
                 'action' => 'disable_ports',
@@ -2347,7 +2349,11 @@ final class AdminController
                 'last_status' => 'ok',
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
-            ]);
+            ];
+            if ($hasServerColumn) {
+                $insert['easydcim_server_id'] = $serverId !== '' ? $serverId : null;
+            }
+            Capsule::table('mod_easydcim_bw_guard_service_state')->insert($insert);
             $updated++;
         }
         return $updated;

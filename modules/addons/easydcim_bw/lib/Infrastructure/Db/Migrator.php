@@ -86,6 +86,7 @@ final class Migrator
             $table->integer('userid')->unsigned();
             $table->string('easydcim_service_id', 64);
             $table->string('easydcim_order_id', 64)->nullable();
+            $table->string('easydcim_server_id', 64)->nullable();
             $table->dateTime('cycle_start')->nullable();
             $table->dateTime('cycle_end')->nullable();
             $table->decimal('base_quota_gb', 12, 2)->default(0);
@@ -249,6 +250,9 @@ final class Migrator
     private function addMissingColumns(): void
     {
         if (Capsule::schema()->hasTable('mod_easydcim_bw_guard_service_state')) {
+            $this->addColumnIfMissing('mod_easydcim_bw_guard_service_state', 'easydcim_server_id', static function (Blueprint $table): void {
+                $table->string('easydcim_server_id', 64)->nullable();
+            });
             $this->addColumnIfMissing('mod_easydcim_bw_guard_service_state', 'lock_version', static function (Blueprint $table): void {
                 $table->unsignedInteger('lock_version')->default(0);
             });

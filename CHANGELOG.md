@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.51] - 2026-02-19
+### Fixed
+- Resolved `servers cache refresh` SQL failure on older installs where `mod_easydcim_bw_guard_service_state.easydcim_server_id` did not exist.
+- `persistResolvedMappings()` is now schema-aware and safely skips `easydcim_server_id` writes when column is missing.
+- Added additive migration to create missing `easydcim_server_id` column in `service_state`.
+### Changed
+- Servers tab action buttons are now grouped side-by-side in clean action cards.
+
 ## [1.50] - 2026-02-19
 ### Fixed
 - Unassigned Services table now filters out malformed/empty API rows to prevent random blank rows and unstable display.

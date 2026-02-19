@@ -175,6 +175,25 @@ final class EasyDcimClient
 
         $durationMs = (int) ((microtime(true) - $started) * 1000);
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        $decodedError = '';
+        if (is_array($decoded)) {
+            foreach (['error', 'message', 'detail', 'details', 'reason'] as $key) {
+                if (!isset($decoded[$key])) {
+                    continue;
+                }
+                if (is_string($decoded[$key]) && trim($decoded[$key]) !== '') {
+                    $decodedError = trim($decoded[$key]);
+                    break;
+                }
+                if (is_array($decoded[$key])) {
+                    $decodedError = trim((string) json_encode($decoded[$key], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                    if ($decodedError !== '') {
+                        break;
+                    }
+                }
+            }
+        }
+        $errorOut = trim($error) !== '' ? $error : $decodedError;
 
         $this->logger->log('INFO', 'easydcim_api_call', [
             'method' => $method,
@@ -182,14 +201,14 @@ final class EasyDcimClient
             'path' => $path,
             'http_code' => $httpCode,
             'duration_ms' => $durationMs,
-            'curl_error' => $error,
+            'curl_error' => $errorOut,
         ]);
 
         $result = [
             'http_code' => $httpCode,
             'data' => is_array($decoded) ? $decoded : [],
             'raw' => $raw,
-            'error' => $error,
+            'error' => $errorOut,
         ];
 
         if ($throwOnError && ($httpCode < 200 || $httpCode >= 300)) {

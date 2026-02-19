@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.46] - 2026-02-19
+### Fixed
+- Added fallback port extraction from `admin/orders/{id}` payload when `client/services/{id}/ports` is blocked (`403/422`) or unavailable.
+- `server_item_test` now keeps working without hardcoded service exceptions by trying service/order/server/IP candidate mapping paths.
+- Improved API error propagation: decoded API error message is now captured and logged even when cURL error is empty.
+### Changed
+- `admin/orders` cache sync now reads up to 5 pages to improve mapping coverage on larger installations.
+
 ## [1.45] - 2026-02-19
 ### Fixed
 - Test flow now builds `service_id` candidates from all available sources (`service CF`, `order cache`, `server cache`, `IP cache`, `order API`) and tries them in sequence.

@@ -623,7 +623,7 @@ final class AdminController
     private function fetchEasyServicesFromAdminOrders(EasyDcimClient $client): array
     {
         $out = [];
-        for ($page = 1; $page <= 2; $page++) {
+        for ($page = 1; $page <= 5; $page++) {
             try {
                 $resp = $client->listAdminOrders(['page' => $page, 'per_page' => 100]);
                 $orders = $this->extractListFromObject((array) ($resp['data'] ?? []));
@@ -1325,6 +1325,16 @@ final class AdminController
             }
             $code = (int) ($response['http_code'] ?? 0);
             $err = trim((string) ($response['error'] ?? ''));
+            $orderIdForFallback = $orderId;
+            if (($code === 401 || $code === 403 || $code === 404 || $code === 422 || $code === 0) && $orderIdForFallback !== '') {
+                $orderPortFallback = $this->portsFromOrderDetails($client, $orderIdForFallback);
+                if (!empty($orderPortFallback['ok'])) {
+                    $response = ['http_code' => 200, 'data' => ['ports' => $orderPortFallback['items']], 'error' => ''];
+                    $code = 200;
+                    $err = '';
+                    $mode = 'order_details_ports';
+                }
+            }
             $ok = $code >= 200 && $code < 300;
             $statusType = 'warning';
             $summary = $this->t('no_data');
@@ -2294,6 +2304,66 @@ final class AdminController
             return $obj;
         }
         return [$obj];
+    }
+
+    private function portsFromOrderDetails(EasyDcimClient $client, string $orderId): array
+    {
+        try {
+            $details = $client->orderDetails($orderId);
+            $data = (array) ($details['data'] ?? []);
+            $items = $this->extractPortsRecursive($data);
+            if (!empty($items)) {
+                $this->logger->log('INFO', 'resolved_ports_from_order', [
+                    'order_id' => $orderId,
+                    'count' => count($items),
+                    'http_code' => (int) ($details['http_code'] ?? 0),
+                ]);
+                return ['ok' => true, 'items' => $items];
+            }
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'resolve_ports_from_order_failed', [
+                'order_id' => $orderId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+        return ['ok' => false, 'items' => []];
+    }
+
+    private function extractPortsRecursive($value): array
+    {
+        $result = [];
+        if (is_array($value)) {
+            $lowerKeys = array_map(static fn ($k): string => strtolower((string) $k), array_keys($value));
+            $looksLikePort = in_array('name', $lowerKeys, true)
+                || in_array('port', $lowerKeys, true)
+                || in_array('port_id', $lowerKeys, true)
+                || in_array('portid', $lowerKeys, true)
+                || in_array('interface', $lowerKeys, true);
+
+            if ($looksLikePort) {
+                $name = (string) ($value['name'] ?? $value['port'] ?? $value['interface'] ?? $value['label'] ?? 'port');
+                $status = strtolower((string) ($value['status'] ?? $value['state'] ?? ''));
+                $isUp = in_array($status, ['up', 'active', 'enabled', 'online'], true)
+                    || ((int) ($value['is_up'] ?? $value['up'] ?? 0) === 1);
+                $traffic = (float) ($value['traffic_total'] ?? $value['total'] ?? $value['usage'] ?? 0.0);
+                $result[] = [
+                    'name' => $name,
+                    'description' => (string) ($value['description'] ?? ''),
+                    'type' => (string) ($value['type'] ?? ''),
+                    'is_up' => $isUp,
+                    'traffic_total' => $traffic,
+                ];
+            }
+
+            foreach ($value as $child) {
+                if (is_array($child)) {
+                    foreach ($this->extractPortsRecursive($child) as $p) {
+                        $result[] = $p;
+                    }
+                }
+            }
+        }
+        return $result;
     }
 
     private function resolveServiceIdFromOrder(EasyDcimClient $client, string $orderId): string

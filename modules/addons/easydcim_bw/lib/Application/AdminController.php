@@ -1119,6 +1119,11 @@ final class AdminController
                 ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
             );
         } catch (\Throwable $e) {
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_last_auto_check_at'],
+                ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            $this->logger->log('WARNING', 'release_auto_refresh_failed', ['error' => $e->getMessage()]);
         }
     }
 
@@ -1129,26 +1134,48 @@ final class AdminController
         if ($baseUrl === '' || $token === '') {
             return ['text' => $this->t('m_not_configured'), 'state' => 'error'];
         }
+
+        $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'conn_runtime_cache_at')->value('meta_value');
+        $cacheJson = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'conn_runtime_cache_json')->value('meta_value');
+        if ($cacheAt !== '' && strtotime($cacheAt) > time() - 60 && $cacheJson !== '') {
+            $decoded = json_decode($cacheJson, true);
+            if (is_array($decoded) && isset($decoded['text'], $decoded['state'])) {
+                return ['text' => (string) $decoded['text'], 'state' => (string) $decoded['state']];
+            }
+        }
+
+        $state = ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
         try {
             $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
             $ping = $client->pingInfo();
             if (!empty($ping['ok'])) {
-                return ['text' => $this->t('m_connected'), 'state' => 'ok'];
+                $state = ['text' => $this->t('m_connected'), 'state' => 'ok'];
+            } elseif (!empty($ping['reachable'])) {
+                $state = ['text' => $this->t('m_configured_reachable'), 'state' => 'warn'];
+            } else {
+                $state = ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
             }
-            if (!empty($ping['reachable'])) {
-                return ['text' => $this->t('m_configured_reachable'), 'state' => 'warn'];
-            }
-            return ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
         } catch (\Throwable $e) {
-            return ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
+            $state = ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
+            $this->logger->log('WARNING', 'connection_runtime_probe_failed', ['error' => $e->getMessage()]);
         }
+
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'conn_runtime_cache_json'],
+            ['meta_value' => json_encode($state, JSON_UNESCAPED_UNICODE), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'conn_runtime_cache_at'],
+            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        return $state;
     }
 
     private function checkReleaseUpdate(): array
     {
         try {
             $repo = self::RELEASE_REPO;
-            $release = $this->fetchLatestRelease($repo, 15);
+            $release = $this->fetchLatestRelease($repo, 5);
             $latestTag = (string) ($release['tag_name'] ?? '');
             $latestVersion = ltrim($latestTag, 'vV');
             $currentVersion = Version::current($this->moduleDir)['module_version'];

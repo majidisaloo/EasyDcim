@@ -103,7 +103,7 @@ final class EasyDcimClient
         if ($this->baseUrl === '' || $this->token === '') {
             return ['ok' => false, 'http_code' => 0, 'error' => 'missing_base_or_token'];
         }
-        $result = $this->request('GET', '/api/v3/client/services', null, null, false, 10);
+        $result = $this->request('GET', '/api/v3/client/services', null, null, false, 5);
         $code = (int) ($result['http_code'] ?? 0);
         return [
             'ok' => $code >= 200 && $code < 300,
@@ -129,7 +129,10 @@ final class EasyDcimClient
 
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(5, max(1, $timeout)));
         curl_setopt($ch, CURLOPT_TIMEOUT, max(1, $timeout));
+        curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+        curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, max(3, min(8, $timeout)));
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         $this->applyProxyOptions($ch);
         if (str_starts_with(strtolower($url), 'https://') && $this->allowSelfSigned) {

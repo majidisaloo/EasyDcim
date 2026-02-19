@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.30] - 2026-02-19
+### Fixed
+- EasyDCIM runtime calls now use explicit `CONNECTTIMEOUT` and low-speed fail-safe options to prevent long blocking requests.
+- Dashboard connection probe now uses a strict 5-second timeout.
+- Manual release check action timeout reduced to 5 seconds to avoid long admin-page waits.
+### Changed
+- Connection runtime status is cached for 60 seconds (`conn_runtime_cache_*`) so repeated admin page loads do not trigger repeated network probes.
+- Auto release refresh now stores check timestamp even on failure, preventing repeated back-to-back external calls when GitHub is unreachable.
+
 ## [1.29] - 2026-02-19
 ### Fixed
 - Resolved admin-side update timeout path that could lead to `504 Gateway Timeout` on shared/proxy setups.

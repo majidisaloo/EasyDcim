@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.72] - 2026-02-19
+### Fixed
+- Strengthened Servers batch AJAX transport for strict WHMCS admin environments:
+  - primary endpoint now uses real form action URL
+  - request payload now includes CSRF token automatically (from hidden input or URL when present)
+  - module/tab parameters are always injected in POST payload
+- This resolves cases where `Test All` still returned HTML (`<!DOCTYPE html>`) instead of JSON.
+
 ## [1.71] - 2026-02-19
 ### Fixed
 - Fixed batch `Test All` transport to avoid HTML responses in AJAX loop:

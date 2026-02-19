@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.85] - 2026-02-19
+### Fixed
+- Reduced repeated `admin/orders/{id}` calls inside service test flow by adding runtime cache for order-details, order-service mapping, and order-ports extraction.
+- Optimized single/batch test path to avoid unnecessary `order_api` resolution when service candidates are already present from cache/custom fields.
+- Added faster `order_only` short-circuit path for single-service tests to prevent repetitive `403/422` client-ports retries when endpoint mode is already known.
+- Improved batch JS runner behavior on inconsistent AJAX state: it now pauses with clear status (instead of forced reload/auto-submit loops), keeping controls usable.
+### Changed
+- Synchronized root and addon README version markers with module version for release workflow compatibility.
+
 ## [1.84] - 2026-02-19
 ### Fixed
 - Reduced repeated `admin/orders/{id}` calls inside service test flow by adding runtime cache for order-details, order-service mapping, and order-ports extraction.

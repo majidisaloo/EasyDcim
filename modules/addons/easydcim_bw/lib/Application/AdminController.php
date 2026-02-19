@@ -524,7 +524,8 @@ final class AdminController
         $easyServices = $this->getEasyServicesCacheOnly();
         $services = $this->getScopedHostingServices($easyServices, false, false);
 
-        $unassigned = $this->buildUnassignedEasyServices($easyServices, $services);
+        $explicitMappedServiceIds = $this->getExplicitMappedEasyServiceIdsForScope();
+        $unassigned = $this->buildUnassignedEasyServices($easyServices, $explicitMappedServiceIds);
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_tab_title')) . '</h3>';
@@ -677,17 +678,9 @@ final class AdminController
         return is_array($decoded) ? $decoded : [];
     }
 
-    private function buildUnassignedEasyServices(array $easyServices, array $services): array
+    private function buildUnassignedEasyServices(array $easyServices, array $explicitMappedServiceIds): array
     {
-        $mappedServiceIds = [];
-        foreach ($services as $svc) {
-            $sid = trim((string) ($svc['easydcim_service_id'] ?? ''));
-            if ($sid !== '') {
-                $mappedServiceIds[$sid] = true;
-            }
-        }
-
-        return array_values(array_filter($easyServices, static function (array $item) use ($mappedServiceIds): bool {
+        return array_values(array_filter($easyServices, static function (array $item) use ($explicitMappedServiceIds): bool {
             $serviceId = trim((string) ($item['service_id'] ?? ''));
             $serverId = trim((string) ($item['server_id'] ?? ''));
             $ip = trim((string) ($item['ip'] ?? ''));
@@ -698,7 +691,7 @@ final class AdminController
             if ($serviceId === '' && $serverId === '' && $ip === '' && $orderId === '' && $iloIp === '' && $label === '') {
                 return false;
             }
-            if ($serviceId !== '' && isset($mappedServiceIds[$serviceId])) {
+            if ($serviceId !== '' && isset($explicitMappedServiceIds[$serviceId])) {
                 return false;
             }
             if ($serverId === '' && $ip === '' && $iloIp === '' && $label === '') {
@@ -709,6 +702,36 @@ final class AdminController
             }
             return true;
         }));
+    }
+
+    private function getExplicitMappedEasyServiceIdsForScope(): array
+    {
+        $q = Capsule::table('tblhosting as h')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->leftJoin('mod_easydcim_bw_guard_service_state as s', 's.serviceid', '=', 'h.id')
+            ->whereIn('h.domainstatus', ['Active', 'Suspended'])
+            ->select(['h.id as serviceid', 's.easydcim_service_id as state_service_id']);
+        $this->applyScopeFilter($q);
+        $rows = $q->get();
+        if ($rows->isEmpty()) {
+            return [];
+        }
+        $serviceIds = $rows->pluck('serviceid')->map(static fn ($v): int => (int) $v)->all();
+        $cfVals = $this->getServiceCustomFieldValues($serviceIds);
+        $mapped = [];
+        foreach ($rows as $r) {
+            $sid = (int) ($r->serviceid ?? 0);
+            if ($sid <= 0) {
+                continue;
+            }
+            $cfService = trim((string) ($cfVals[$sid]['easydcim_service_id'] ?? ''));
+            $stateService = trim((string) ($r->state_service_id ?? ''));
+            $explicit = $cfService !== '' ? $cfService : $stateService;
+            if ($explicit !== '') {
+                $mapped[$explicit] = true;
+            }
+        }
+        return $mapped;
     }
 
     private function fetchEasyServices(): array
@@ -999,6 +1022,12 @@ final class AdminController
             return [];
         }
         $warnings = [];
+        if (empty($easyServices)) {
+            $warnings[] = [
+                'type' => $this->t('warn_easy_cache_empty'),
+                'text' => htmlspecialchars($this->t('warn_easy_cache_empty_text')),
+            ];
+        }
 
         $activeRows = array_values(array_filter($rows, static fn (array $r): bool => strtolower((string) ($r['domainstatus'] ?? '')) === 'active'));
         $shared = [];
@@ -1090,7 +1119,8 @@ final class AdminController
             ];
         }
 
-        $unassigned = $this->buildUnassignedEasyServices($easyServices, $rows);
+        $explicitMappedServiceIds = $this->getExplicitMappedEasyServiceIdsForScope();
+        $unassigned = $this->buildUnassignedEasyServices($easyServices, $explicitMappedServiceIds);
         if (!empty($unassigned)) {
             $byIp = [];
             $byLabel = [];
@@ -1156,6 +1186,36 @@ final class AdminController
                 $warnings[] = [
                     'type' => $this->t('warn_unassigned_possible_match'),
                     'text' => implode(' | ', $parts) . ' | ' . htmlspecialchars($this->t('warn_unassigned_possible_match_target')) . ': ' . implode(' , ', $serviceLinks),
+                ];
+            }
+        }
+
+        foreach ($activeRows as $r) {
+            $explicitService = trim((string) ($r['easydcim_service_id_explicit'] ?? ''));
+            $resolvedService = trim((string) ($r['easydcim_service_id'] ?? ''));
+            $resolvedOrder = trim((string) ($r['easydcim_order_id'] ?? ''));
+            $resolvedServer = trim((string) ($r['easydcim_server_id'] ?? ''));
+            if ($resolvedService === '') {
+                continue;
+            }
+            if ($explicitService === '') {
+                $serviceLink = '<a href="' . htmlspecialchars((string) $r['service_url']) . '">#' . (int) $r['serviceid'] . '</a>';
+                $warnings[] = [
+                    'type' => $this->t('warn_missing_explicit_map'),
+                    'text' => $this->t('service') . ' ' . $serviceLink
+                        . ' | EasyDCIM Service=' . htmlspecialchars($resolvedService)
+                        . ($resolvedOrder !== '' ? (' | Order=' . htmlspecialchars($resolvedOrder)) : '')
+                        . ($resolvedServer !== '' ? (' | Server=' . htmlspecialchars($resolvedServer)) : ''),
+                ];
+                continue;
+            }
+            if ($explicitService !== $resolvedService) {
+                $serviceLink = '<a href="' . htmlspecialchars((string) $r['service_url']) . '">#' . (int) $r['serviceid'] . '</a>';
+                $warnings[] = [
+                    'type' => $this->t('warn_explicit_map_mismatch'),
+                    'text' => $this->t('service') . ' ' . $serviceLink
+                        . ' | ' . htmlspecialchars($this->t('warn_expected')) . '=' . htmlspecialchars($explicitService)
+                        . ' | ' . htmlspecialchars($this->t('warn_detected')) . '=' . htmlspecialchars($resolvedService),
                 ];
             }
         }
@@ -2414,7 +2474,8 @@ final class AdminController
             $svcCf = $cfVals[$sid]['easydcim_service_id'] ?? '';
             $srvCf = $cfVals[$sid]['easydcim_server_id'] ?? '';
             $ordCf = $cfVals[$sid]['easydcim_order_id'] ?? '';
-            $resolvedService = $svcCf !== '' ? $svcCf : (string) ($r->state_service_id ?? '');
+            $explicitService = $svcCf !== '' ? $svcCf : (string) ($r->state_service_id ?? '');
+            $resolvedService = $explicitService;
             $resolvedServer = $srvCf;
             $resolvedOrder = $ordCf;
 
@@ -2551,6 +2612,7 @@ final class AdminController
                 'easydcim_client_name' => $easyClientName,
                 'easydcim_client_email' => $easyClientEmail,
                 'ip' => (string) ($r->dedicatedip ?? ''),
+                'easydcim_service_id_explicit' => $explicitService,
                 'easydcim_order_id' => $resolvedOrder,
                 'easydcim_service_id' => $resolvedService,
                 'easydcim_server_id' => $resolvedServer,
@@ -3697,6 +3759,12 @@ final class AdminController
             'warn_active_no_traffic' => 'سرویس فعال بدون ترافیک شبکه',
             'warn_unassigned_possible_match' => 'سرویس آزاد با احتمال مپ اشتباه',
             'warn_unassigned_possible_match_target' => 'تطابق احتمالی با سرویس‌های WHMCS',
+            'warn_missing_explicit_map' => 'نگاشت صریح EasyDCIM ثبت نشده',
+            'warn_explicit_map_mismatch' => 'اختلاف نگاشت صریح با نگاشت تشخیص‌داده‌شده',
+            'warn_expected' => 'ثبت‌شده',
+            'warn_detected' => 'تشخیص‌داده‌شده',
+            'warn_easy_cache_empty' => 'کش EasyDCIM خالی است',
+            'warn_easy_cache_empty_text' => 'ابتدا از تب Servers گزینه Refresh Cache را اجرا کنید تا اختلاف‌ها و سرویس‌های آزاد قابل تحلیل شوند.',
             'm_version' => 'نسخه',
             'm_commit' => 'کامیت',
             'm_update_status' => 'وضعیت آپدیت',
@@ -3900,6 +3968,12 @@ final class AdminController
             'warn_active_no_traffic' => 'Active service with no network traffic',
             'warn_unassigned_possible_match' => 'Unassigned service with possible WHMCS match',
             'warn_unassigned_possible_match_target' => 'Possible match with WHMCS services',
+            'warn_missing_explicit_map' => 'Missing explicit EasyDCIM mapping',
+            'warn_explicit_map_mismatch' => 'Explicit mapping mismatch',
+            'warn_expected' => 'Expected',
+            'warn_detected' => 'Detected',
+            'warn_easy_cache_empty' => 'EasyDCIM cache is empty',
+            'warn_easy_cache_empty_text' => 'Run Refresh Cache in the Servers tab first so mismatches and unassigned services can be analyzed.',
             'm_version' => 'Version',
             'm_commit' => 'Commit',
             'm_update_status' => 'Update Status',

@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.66] - 2026-02-19
+### Fixed
+- `Unassigned Services` mapping now uses only explicit WHMCS mappings (custom field/service-state), not inferred runtime matches; this prevents false “everything mapped” cases.
+- `Important Warnings` now flags:
+  - services that resolve to an EasyDCIM service but have no explicit mapping saved
+  - explicit-vs-detected service ID mismatches
+### Added
+- New warning when EasyDCIM cache is empty, with clear instruction to run `Refresh Cache`.
+
 ## [1.65] - 2026-02-19
 ### Fixed
 - Servers batch controls now follow mixed behavior for stability:

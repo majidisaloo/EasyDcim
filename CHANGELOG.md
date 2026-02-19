@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.42] - 2026-02-19
+### Fixed
+- `Servers -> Test` now stores and shows per-service port test result directly in the table, so `Ports Status` is no longer stuck on `No data` after a successful test.
+- Test output is now explicit for three cases: network ports found, only non-network ports found, or no ports returned.
+### Performance
+- Test action now reads scoped services from local cache-first mapping path and avoids triggering expensive per-row API resolution.
+
 ## [1.41] - 2026-02-19
 ### Fixed
 - Health Check custom-field coverage now accepts both product custom fields and product configurable options (`Service ID`, `Order ID`, `Server ID`) so scoped products are detected correctly.

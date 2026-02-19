@@ -52,6 +52,10 @@ final class AdminController
             $this->json($this->getEnforcementLogs(300));
             return;
         }
+        if ($api === 'save_plan') {
+            $this->json($this->saveProductPlan());
+            return;
+        }
 
         if ($action === 'apply_update') {
             $flash[] = ['type' => 'warning', 'text' => 'Git shell update is disabled. Use Release update actions.'];
@@ -113,7 +117,7 @@ final class AdminController
         $version = Version::current($this->moduleDir);
 
         echo '<link rel="stylesheet" href="../modules/addons/easydcim_bw/assets/admin.css">';
-        echo '<div class="edbw-wrap">';
+        echo '<div class="edbw-wrap' . ($this->isFa ? ' edbw-fa' : '') . '">';
         echo '<div class="edbw-header">';
         echo '<h2>EasyDcim-BW</h2>';
         echo '<p>' . htmlspecialchars($this->t('subtitle')) . '</p>';
@@ -132,6 +136,8 @@ final class AdminController
             $this->renderConnectionTab();
         } elseif ($tab === 'scope') {
             $this->renderScopeTab();
+        } elseif ($tab === 'servers') {
+            $this->renderServersTab();
         } elseif ($tab === 'packages') {
             $this->renderPackagesTab();
         } elseif ($tab === 'logs') {
@@ -150,6 +156,7 @@ final class AdminController
             'connection' => $this->t('tab_connection'),
             'settings' => $this->t('tab_settings'),
             'scope' => $this->t('tab_scope'),
+            'servers' => $this->t('tab_servers'),
             'packages' => $this->t('tab_packages'),
             'logs' => $this->t('tab_logs'),
         ];
@@ -178,27 +185,27 @@ final class AdminController
         }
 
         echo '<div class="edbw-metrics">';
-        $this->renderMetricCard('Version', (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
-        $this->renderMetricCard('Commit', (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
-        $this->renderMetricCard('Update Status', $updateAvailable ? 'New commit available' : 'Up to date', $updateAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
-        $this->renderMetricCard('Release Status', $releaseAvailable ? 'Update available' : 'Up to date', $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M6 4h12v4H6zM5 10h14v10H5zM10 14h4"></path></svg>');
-        $this->renderMetricCard('Cron Poll', $lastPollAt !== '' ? $lastPollAt : 'No data', $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
-        $this->renderMetricCard('API Fail Count', (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
-        $this->renderMetricCard('Update Lock', $updateLock ? 'Locked' : 'Free', $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
-        $this->renderMetricCard('EasyDCIM Connection', (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? 'Configured' : 'Not configured', (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
+        $this->renderMetricCard($this->t('m_version'), (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
+        $this->renderMetricCard($this->t('m_commit'), (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
+        $this->renderMetricCard($this->t('m_update_status'), $updateAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $updateAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
+        $this->renderMetricCard($this->t('m_release_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M6 4h12v4H6zM5 10h14v10H5zM10 14h4"></path></svg>');
+        $this->renderMetricCard($this->t('m_cron_poll'), $lastPollAt !== '' ? $lastPollAt : $this->t('m_no_data'), $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
+        $this->renderMetricCard($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
+        $this->renderMetricCard($this->t('m_update_lock'), $updateLock ? $this->t('m_locked') : $this->t('m_free'), $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
+        $this->renderMetricCard($this->t('m_connection'), (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? $this->t('m_configured') : $this->t('m_not_configured'), (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
 
         foreach ($this->buildRuntimeStatus() as $card) {
             $this->renderMetricCard($card['label'], $card['value'], $card['state'], $card['icon']);
         }
 
-        $this->renderMetricCard('Latest Release', $releaseTag !== '' ? $releaseTag : 'Unknown', $releaseTag !== '' ? 'ok' : 'neutral', '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"></path></svg>');
+        $this->renderMetricCard($this->t('m_latest_release'), $releaseTag !== '' ? $releaseTag : $this->t('m_unknown'), $releaseTag !== '' ? 'ok' : 'neutral', '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"></path></svg>');
         echo '</div>';
 
         echo '<div class="edbw-panel">';
-        echo '<h3>Update Actions</h3>';
-        echo '<div class="edbw-actions">';
-        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="check_release_update"><button class="btn btn-default" type="submit">Check Update Now</button></form>';
-        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="apply_release_update"><button class="btn btn-primary" type="submit">Apply Latest Release</button></form>';
+        echo '<h3>' . htmlspecialchars($this->t('update_actions')) . '</h3>';
+        echo '<div class="edbw-actions edbw-actions-col">';
+        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="check_release_update"><button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('check_update_now')) . '</button></form>';
+        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="apply_release_update"><button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('apply_latest_release')) . '</button></form>';
         echo '</div>';
         echo '</div>';
 
@@ -220,35 +227,35 @@ final class AdminController
     {
         $s = $this->settings;
         echo '<div class="edbw-panel">';
-        echo '<h3>Module Settings</h3>';
+        echo '<h3>' . htmlspecialchars($this->t('module_settings')) . '</h3>';
         echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="tab" value="settings">';
         echo '<input type="hidden" name="action" value="save_settings">';
-        echo '<div class="edbw-form-inline"><label>Module Status</label><select name="module_enabled"><option value="1"' . ((string) $s->getString('module_enabled', '1') === '1' ? ' selected' : '') . '>Active</option><option value="0"' . ((string) $s->getString('module_enabled', '1') === '0' ? ' selected' : '') . '>Disable</option></select><span class="edbw-help">Disable temporarily without losing data.</span></div>';
-        echo '<div class="edbw-form-inline"><label>UI Language</label><select name="ui_language"><option value="auto"' . ($s->getString('ui_language', 'auto') === 'auto' ? ' selected' : '') . '>Default</option><option value="english"' . ($s->getString('ui_language', 'auto') === 'english' ? ' selected' : '') . '>English</option><option value="farsi"' . ($s->getString('ui_language', 'auto') === 'farsi' ? ' selected' : '') . '>فارسی</option></select></div>';
-        echo '<div class="edbw-form-inline"><label>Poll Interval (min)</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Graph Cache (min)</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('module_status')) . '</label><select name="module_enabled"><option value="1"' . ((string) $s->getString('module_enabled', '1') === '1' ? ' selected' : '') . '>' . htmlspecialchars($this->t('active')) . '</option><option value="0"' . ((string) $s->getString('module_enabled', '1') === '0' ? ' selected' : '') . '>' . htmlspecialchars($this->t('disabled')) . '</option></select><span class="edbw-help">' . htmlspecialchars($this->t('module_status_help')) . '</span></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('ui_language')) . '</label><select name="ui_language"><option value="auto"' . ($s->getString('ui_language', 'auto') === 'auto' ? ' selected' : '') . '>' . htmlspecialchars($this->t('lang_default')) . '</option><option value="english"' . ($s->getString('ui_language', 'auto') === 'english' ? ' selected' : '') . '>English</option><option value="farsi"' . ($s->getString('ui_language', 'auto') === 'farsi' ? ' selected' : '') . '>فارسی</option></select></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('poll_interval')) . '</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('graph_cache')) . '</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
 
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Enabled</label><input type="checkbox" name="autobuy_enabled" value="1" ' . ($s->getBool('autobuy_enabled') ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Threshold GB</label><input type="number" min="1" name="autobuy_threshold_gb" value="' . (int) $s->getInt('autobuy_threshold_gb', 10) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Default Package ID</label><input type="number" min="0" name="autobuy_default_package_id" value="' . (int) $s->getInt('autobuy_default_package_id', 0) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Auto-Buy Max/Cycle</label><input type="number" min="1" name="autobuy_max_per_cycle" value="' . (int) $s->getInt('autobuy_max_per_cycle', 5) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_enabled')) . '</label><input type="checkbox" name="autobuy_enabled" value="1" ' . ($s->getBool('autobuy_enabled') ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_threshold')) . '</label><input type="number" min="1" name="autobuy_threshold_gb" value="' . (int) $s->getInt('autobuy_threshold_gb', 10) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_package')) . '</label><input type="number" min="0" name="autobuy_default_package_id" value="' . (int) $s->getInt('autobuy_default_package_id', 0) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_max')) . '</label><input type="number" min="1" name="autobuy_max_per_cycle" value="' . (int) $s->getInt('autobuy_max_per_cycle', 5) . '"></div>';
 
-        echo '<div class="edbw-form-inline"><label>Update Source</label><span class="edbw-help">Hardcoded to GitHub release: majidisaloo/EasyDcim</span></div>';
-        echo '<div class="edbw-form-inline"><label>Update Mode</label><select name="update_mode">';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('update_source')) . '</label><span class="edbw-help">Hardcoded to GitHub release: majidisaloo/EasyDcim</span></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('update_mode')) . '</label><select name="update_mode">';
         foreach (['notify', 'check_oneclick', 'auto'] as $mode) {
             echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
         }
         echo '</select></div>';
-        echo '<div class="edbw-form-inline"><label>Direction Mapping</label><select name="traffic_direction_map"><option value="normal"' . ($s->getString('traffic_direction_map', 'normal') === 'normal' ? ' selected' : '') . '>Normal</option><option value="swap"' . ($s->getString('traffic_direction_map', 'normal') === 'swap' ? ' selected' : '') . '>Swap IN/OUT</option></select><span class="edbw-help">Use swap if EasyDCIM IN/OUT is reversed on your network devices.</span></div>';
-        echo '<div class="edbw-form-inline"><label>Default Calculation Mode</label><select name="default_calculation_mode"><option value="TOTAL"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'TOTAL' ? ' selected' : '') . '>TOTAL (IN+OUT)</option><option value="IN"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'IN' ? ' selected' : '') . '>IN only</option><option value="OUT"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'OUT' ? ' selected' : '') . '>OUT only</option></select></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('direction_mapping')) . '</label><select name="traffic_direction_map"><option value="normal"' . ($s->getString('traffic_direction_map', 'normal') === 'normal' ? ' selected' : '') . '>' . htmlspecialchars($this->t('normal')) . '</option><option value="swap"' . ($s->getString('traffic_direction_map', 'normal') === 'swap' ? ' selected' : '') . '>' . htmlspecialchars($this->t('swap_in_out')) . '</option></select><span class="edbw-help">' . htmlspecialchars($this->t('direction_mapping_help')) . '</span></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('default_calc_mode')) . '</label><select name="default_calculation_mode"><option value="TOTAL"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'TOTAL' ? ' selected' : '') . '>TOTAL (IN+OUT)</option><option value="IN"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'IN' ? ' selected' : '') . '>IN</option><option value="OUT"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'OUT' ? ' selected' : '') . '>OUT</option></select></div>';
 
-        echo '<div class="edbw-form-inline"><label>Test Mode (Dry Run)</label><input type="checkbox" name="test_mode" value="1" ' . ($s->getBool('test_mode', false) ? 'checked' : '') . '><span class="edbw-help">No real suspend/disable/enable/unsuspend calls; logs show what would be sent.</span></div>';
-        echo '<div class="edbw-form-inline"><label>Log Retention (days)</label><input type="number" min="1" name="log_retention_days" value="' . (int) $s->getInt('log_retention_days', 30) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Preflight Strict Mode</label><input type="checkbox" name="preflight_strict_mode" value="1" ' . ($s->getBool('preflight_strict_mode', true) ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Purge Data On Deactivate</label><input type="checkbox" name="purge_on_deactivate" value="1" ' . ($s->getBool('purge_on_deactivate', false) ? 'checked' : '') . '><span class="edbw-help">If enabled, all `mod_easydcim_bw_guard_*` tables and module settings are deleted on deactivate.</span></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('test_mode')) . '</label><input type="checkbox" name="test_mode" value="1" ' . ($s->getBool('test_mode', false) ? 'checked' : '') . '><span class="edbw-help">' . htmlspecialchars($this->t('test_mode_help')) . '</span></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('log_retention')) . '</label><input type="number" min="1" name="log_retention_days" value="' . (int) $s->getInt('log_retention_days', 30) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('preflight_strict')) . '</label><input type="checkbox" name="preflight_strict_mode" value="1" ' . ($s->getBool('preflight_strict_mode', true) ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('purge_on_deactivate')) . '</label><input type="checkbox" name="purge_on_deactivate" value="1" ' . ($s->getBool('purge_on_deactivate', false) ? 'checked' : '') . '><span class="edbw-help">' . htmlspecialchars($this->t('purge_on_deactivate_help')) . '</span></div>';
 
-        echo '<button class="btn btn-primary" type="submit">Save Settings</button>';
+        echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('save_settings')) . '</button>';
         echo '</form>';
         echo '</div>';
     }
@@ -257,22 +264,22 @@ final class AdminController
     {
         $s = $this->settings;
         echo '<div class="edbw-panel">';
-        echo '<h3>EasyDCIM Connection</h3>';
+        echo '<h3>' . htmlspecialchars($this->t('easy_connection')) . '</h3>';
         echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="tab" value="connection">';
-        echo '<div class="edbw-form-inline"><label>EasyDCIM Base URL</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="70"></div>';
-        echo '<div class="edbw-form-inline"><label>Admin API Token</label><input type="password" name="easydcim_api_token" value="" placeholder="Leave empty to keep current token" size="70"></div>';
-        echo '<div class="edbw-form-inline"><label>Use Impersonation</label><input type="checkbox" name="use_impersonation" value="1" ' . ($s->getBool('use_impersonation', false) ? 'checked' : '') . '></div>';
-        echo '<h4>Proxy</h4>';
-        echo '<div class="edbw-form-inline"><label>Enable Proxy</label><input type="checkbox" name="proxy_enabled" value="1" ' . ($s->getBool('proxy_enabled', false) ? 'checked' : '') . '></div>';
-        echo '<div class="edbw-form-inline"><label>Proxy Type</label><select name="proxy_type"><option value="http"' . ($s->getString('proxy_type', 'http') === 'http' ? ' selected' : '') . '>HTTP</option><option value="https"' . ($s->getString('proxy_type', 'http') === 'https' ? ' selected' : '') . '>HTTPS</option><option value="socks5"' . ($s->getString('proxy_type', 'http') === 'socks5' ? ' selected' : '') . '>SOCKS5</option><option value="socks4"' . ($s->getString('proxy_type', 'http') === 'socks4' ? ' selected' : '') . '>SOCKS4</option></select></div>';
-        echo '<div class="edbw-form-inline"><label>Proxy Host</label><input type="text" name="proxy_host" value="' . htmlspecialchars($s->getString('proxy_host')) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Proxy Port</label><input type="number" min="1" name="proxy_port" value="' . (int) $s->getInt('proxy_port', 0) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Proxy Username</label><input type="text" name="proxy_username" value="' . htmlspecialchars($s->getString('proxy_username')) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>Proxy Password</label><input type="password" name="proxy_password" value="" placeholder="Leave empty to keep current password"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('base_url')) . '</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="70"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('api_token')) . '</label><input type="password" name="easydcim_api_token" value="" placeholder="' . htmlspecialchars($this->t('keep_secret')) . '" size="70"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('access_mode')) . '</label><select name="use_impersonation"><option value="0"' . ($s->getBool('use_impersonation', false) ? '' : ' selected') . '>' . htmlspecialchars($this->t('restricted_mode')) . '</option><option value="1"' . ($s->getBool('use_impersonation', false) ? ' selected' : '') . '>' . htmlspecialchars($this->t('unrestricted_mode')) . '</option></select></div>';
+        echo '<h4>' . htmlspecialchars($this->t('proxy_title')) . '</h4>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_enable')) . '</label><input type="checkbox" name="proxy_enabled" value="1" ' . ($s->getBool('proxy_enabled', false) ? 'checked' : '') . '></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_type')) . '</label><select name="proxy_type"><option value="http"' . ($s->getString('proxy_type', 'http') === 'http' ? ' selected' : '') . '>HTTP</option><option value="https"' . ($s->getString('proxy_type', 'http') === 'https' ? ' selected' : '') . '>HTTPS</option><option value="socks5"' . ($s->getString('proxy_type', 'http') === 'socks5' ? ' selected' : '') . '>SOCKS5</option><option value="socks4"' . ($s->getString('proxy_type', 'http') === 'socks4' ? ' selected' : '') . '>SOCKS4</option></select></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_host')) . '</label><input type="text" name="proxy_host" value="' . htmlspecialchars($s->getString('proxy_host')) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_port')) . '</label><input type="number" min="1" name="proxy_port" value="' . (int) $s->getInt('proxy_port', 0) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_user')) . '</label><input type="text" name="proxy_username" value="' . htmlspecialchars($s->getString('proxy_username')) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_pass')) . '</label><input type="password" name="proxy_password" value="" placeholder="' . htmlspecialchars($this->t('keep_secret')) . '"></div>';
         echo '<div class="edbw-actions">';
-        echo '<button class="btn btn-primary" type="submit" name="action" value="save_connection">Save Connection</button>';
-        echo '<button class="btn btn-default" type="submit" name="action" value="test_easydcim">Test EasyDCIM Connection</button>';
+        echo '<button class="btn btn-primary" type="submit" name="action" value="save_connection">' . htmlspecialchars($this->t('save_connection')) . '</button>';
+        echo '<button class="btn btn-default" type="submit" name="action" value="test_easydcim">' . htmlspecialchars($this->t('test_connection')) . '</button>';
         echo '</div>';
         echo '</form>';
         echo '</div>';
@@ -340,46 +347,130 @@ final class AdminController
         $s = $this->settings;
         $scopedProducts = $this->getScopedProducts();
         echo '<div class="edbw-panel">';
-        echo '<h3>Managed Scope</h3>';
+        echo '<h3>' . htmlspecialchars($this->t('managed_scope')) . '</h3>';
         echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="tab" value="scope">';
         echo '<input type="hidden" name="action" value="save_scope">';
-        echo '<div class="edbw-form-inline"><label>Managed PIDs</label><input type="text" name="managed_pids" value="' . htmlspecialchars($s->getString('managed_pids')) . '" size="70"><span class="edbw-help">Comma separated product IDs</span></div>';
-        echo '<div class="edbw-form-inline"><label>Managed GIDs</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="70"><span class="edbw-help">Comma separated group IDs</span></div>';
-        echo '<button class="btn btn-primary" type="submit">Save Scope</button>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('managed_pids')) . '</label><input type="text" name="managed_pids" value="' . htmlspecialchars($s->getString('managed_pids')) . '" size="70"><span class="edbw-help">' . htmlspecialchars($this->t('comma_pids')) . '</span></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('managed_gids')) . '</label><input type="text" name="managed_gids" value="' . htmlspecialchars($s->getString('managed_gids')) . '" size="70"><span class="edbw-help">' . htmlspecialchars($this->t('comma_gids')) . '</span></div>';
+        echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('save_scope')) . '</button>';
         echo '</form>';
-        echo '<p class="edbw-help">Loaded products by current scope: ' . count($scopedProducts) . '</p>';
+        echo '<p class="edbw-help">' . htmlspecialchars($this->t('loaded_products')) . ': ' . count($scopedProducts) . '</p>';
         echo '</div>';
 
         echo '<div class="edbw-panel">';
-        echo '<h3>Plan Quotas (IN / OUT / TOTAL)</h3>';
-        echo '<p class="edbw-help">Rows auto-save on change. You can still use Save Scope above for PID/GID updates.</p>';
+        echo '<h3>' . htmlspecialchars($this->t('plan_quotas')) . '</h3>';
+        echo '<p class="edbw-help">' . htmlspecialchars($this->t('plan_quotas_help')) . '</p>';
         echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>Product</th><th>GID</th><th>CF Check</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>Unlimited IN/OUT/TOTAL</th><th>Action</th></tr></thead><tbody>';
+        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>' . htmlspecialchars($this->t('product')) . '</th><th>GID</th><th>' . htmlspecialchars($this->t('cf_check')) . '</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>' . htmlspecialchars($this->t('unlimited_label')) . '</th><th>' . htmlspecialchars($this->t('action')) . '</th></tr></thead><tbody>';
         foreach ($scopedProducts as $row) {
-            echo '<tr><form method="post" class="edbw-auto-plan">';
-            echo '<input type="hidden" name="tab" value="scope">';
-            echo '<input type="hidden" name="action" value="save_product_plan">';
-            echo '<input type="hidden" name="pd_pid" value="' . (int) $row['pid'] . '">';
+            echo '<tr class="edbw-auto-plan" data-pid="' . (int) $row['pid'] . '">';
             echo '<td>' . (int) $row['pid'] . '</td>';
             echo '<td>' . htmlspecialchars((string) $row['name']) . '</td>';
             echo '<td>' . (int) $row['gid'] . '</td>';
             $cfStatus = (($row['cf_service'] ? 'S' : '-') . '/' . ($row['cf_order'] ? 'O' : '-') . '/' . ($row['cf_server'] ? 'V' : '-'));
             echo '<td>' . htmlspecialchars($cfStatus) . '</td>';
-            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_in_gb" value="' . htmlspecialchars((string) $row['quota_in']) . '"' . ($row['unlimited_in'] ? ' disabled' : '') . '></td>';
-            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_out_gb" value="' . htmlspecialchars((string) $row['quota_out']) . '"' . ($row['unlimited_out'] ? ' disabled' : '') . '></td>';
-            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_total_gb" value="' . htmlspecialchars((string) $row['quota_total']) . '"' . ($row['unlimited_total'] ? ' disabled' : '') . '></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_in_gb" value="' . htmlspecialchars((string) $row['quota_in']) . '"' . ($row['unlimited_in'] ? ' disabled class="edbw-disabled-input"' : '') . '></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_out_gb" value="' . htmlspecialchars((string) $row['quota_out']) . '"' . ($row['unlimited_out'] ? ' disabled class="edbw-disabled-input"' : '') . '></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="pd_quota_total_gb" value="' . htmlspecialchars((string) $row['quota_total']) . '"' . ($row['unlimited_total'] ? ' disabled class="edbw-disabled-input"' : '') . '></td>';
             echo '<td>';
             echo '<label>IN <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_in_gb" name="pd_unlimited_in" value="1" ' . ($row['unlimited_in'] ? 'checked' : '') . '></label> ';
             echo '<label>OUT <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_out_gb" name="pd_unlimited_out" value="1" ' . ($row['unlimited_out'] ? 'checked' : '') . '></label> ';
             echo '<label>TOTAL <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_total_gb" name="pd_unlimited_total" value="1" ' . ($row['unlimited_total'] ? 'checked' : '') . '></label>';
             echo '</td>';
-            echo '<td><select name="pd_action"><option value="disable_ports"' . ($row['action'] === 'disable_ports' ? ' selected' : '') . '>Disable Ports</option><option value="suspend"' . ($row['action'] === 'suspend' ? ' selected' : '') . '>Suspend</option><option value="both"' . ($row['action'] === 'both' ? ' selected' : '') . '>Both</option></select></td>';
-            echo '</form></tr>';
+            echo '<td><select name="pd_action"><option value="disable_ports"' . ($row['action'] === 'disable_ports' ? ' selected' : '') . '>' . htmlspecialchars($this->t('disable_ports')) . '</option><option value="suspend"' . ($row['action'] === 'suspend' ? ' selected' : '') . '>' . htmlspecialchars($this->t('suspend')) . '</option><option value="both"' . ($row['action'] === 'both' ? ' selected' : '') . '>' . htmlspecialchars($this->t('both')) . '</option></select></td>';
+            echo '</tr>';
         }
         echo '</tbody></table>';
         echo '</div>';
-        echo '<script>(function(){var forms=document.querySelectorAll(".edbw-auto-plan");forms.forEach(function(f){var t;f.querySelectorAll("input,select").forEach(function(el){el.addEventListener("change",function(){if(el.classList.contains("edbw-limit-toggle")){var target=f.querySelector("[name=\\"" + el.getAttribute("data-target") + "\\"]");if(target){target.disabled=el.checked;}}clearTimeout(t);t=setTimeout(function(){f.submit();},350);});});});})();</script>';
+        echo '<div class="edbw-actions"><button type="button" id="edbw-save-all" class="btn btn-primary">' . htmlspecialchars($this->t('save_all_plans')) . '</button><span id="edbw-save-note" class="edbw-help"></span></div>';
+        echo '<script>(function(){'
+            . 'var rows=document.querySelectorAll(".edbw-auto-plan");'
+            . 'var note=document.getElementById("edbw-save-note");'
+            . 'var q=window.location.search||"";var sep=q.indexOf("?")===-1?"?":"&";var apiUrl=window.location.pathname+q+sep+"api=save_plan";'
+            . 'function applyToggles(r){r.querySelectorAll(".edbw-limit-toggle").forEach(function(c){var target=r.querySelector("[name=\\"" + c.getAttribute("data-target") + "\\"]");if(target){target.disabled=c.checked;if(c.checked){target.classList.add("edbw-disabled-input");}else{target.classList.remove("edbw-disabled-input");}}});}'
+            . 'function rowData(r){var fd=new FormData();fd.append("tab","scope");fd.append("action","save_product_plan");fd.append("pd_pid",r.getAttribute("data-pid")||"0");r.querySelectorAll("input,select").forEach(function(el){if(!el.name){return;}if(el.type==="checkbox"){if(el.checked){fd.append(el.name,"1");}return;}fd.append(el.name,el.value||"");});return fd;}'
+            . 'function postRow(r){var fd=rowData(r);fd.append("ajax","1");'
+            . 'fetch(apiUrl,{method:"POST",body:fd,credentials:"same-origin"})'
+            . '.then(function(r){return r.json();}).then(function(j){note.textContent=(j.text||"' . addslashes($this->t('saved')) . '");note.style.color=(j.type==="success"?"#047857":"#b91c1c");})'
+            . '.catch(function(){note.textContent="' . addslashes($this->t('save_failed')) . '";note.style.color="#b91c1c";});}'
+            . 'rows.forEach(function(r){applyToggles(r);var t;var onEdit=function(){applyToggles(r);clearTimeout(t);t=setTimeout(function(){postRow(r);},350);};r.querySelectorAll("input,select").forEach(function(el){el.addEventListener("change",onEdit);if(el.tagName==="INPUT" && el.type!=="checkbox"){el.addEventListener("input",onEdit);}});});'
+            . 'var saveAll=document.getElementById("edbw-save-all");if(saveAll){saveAll.addEventListener("click",function(){var i=0;function next(){if(i>=rows.length){note.textContent="' . addslashes($this->t('all_rows_saved')) . '";note.style.color="#047857";return;}postRow(rows[i]);i++;setTimeout(next,120);}next();});}'
+            . '})();</script>';
+        echo '</div>';
+    }
+
+    private function renderServersTab(): void
+    {
+        $baseUrl = $this->settings->getString('easydcim_base_url');
+        $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+        $apiAvailable = $baseUrl !== '' && $token !== '';
+        $easyServices = [];
+
+        if ($apiAvailable) {
+            try {
+                $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+                $resp = $client->listServices();
+                $easyServices = $this->extractServiceItems((array) ($resp['data'] ?? []));
+            } catch (\Throwable $e) {
+                $this->logger->log('WARNING', 'servers_tab_list_failed', ['error' => $e->getMessage()]);
+            }
+        }
+        $services = $this->getScopedHostingServices($easyServices);
+
+        $mappedServiceIds = [];
+        foreach ($services as $svc) {
+            $sid = trim((string) ($svc['easydcim_service_id'] ?? ''));
+            if ($sid !== '') {
+                $mappedServiceIds[$sid] = true;
+            }
+        }
+        $unassigned = array_values(array_filter($easyServices, static fn (array $item): bool => !isset($mappedServiceIds[(string) ($item['service_id'] ?? '')])));
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>' . htmlspecialchars($this->t('servers_tab_title')) . '</h3>';
+        if (!$apiAvailable) {
+            echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_missing')) . '</div>';
+        } else {
+            echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_api_loaded')) . ': ' . count($easyServices) . '</p>';
+        }
+        echo '</div>';
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th></tr></thead><tbody>';
+        foreach ($services as $svc) {
+            echo '<tr>';
+            echo '<td>#' . (int) $svc['serviceid'] . '</td>';
+            echo '<td>#' . (int) $svc['userid'] . ' - ' . htmlspecialchars((string) $svc['firstname'] . ' ' . (string) $svc['lastname']) . '</td>';
+            echo '<td>' . (int) $svc['pid'] . '</td>';
+            echo '<td>' . htmlspecialchars((string) $svc['ip']) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($svc['easydcim_service_id'] ?: '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($svc['easydcim_server_id'] ?: '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) $svc['ports_summary']) . '</td>';
+            echo '</tr>';
+        }
+        if (empty($services)) {
+            echo '<tr><td colspan="7">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+        }
+        echo '</tbody></table></div>';
+        echo '</div>';
+
+        echo '<div class="edbw-panel">';
+        echo '<h3>' . htmlspecialchars($this->t('servers_unassigned')) . '</h3>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
+        foreach ($unassigned as $item) {
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars((string) ($item['service_id'] ?? '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($item['server_id'] ?? '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($item['ip'] ?? '-')) . '</td>';
+            echo '<td>' . htmlspecialchars((string) ($item['status'] ?? '-')) . '</td>';
+            echo '</tr>';
+        }
+        if (empty($unassigned)) {
+            echo '<tr><td colspan="4">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+        }
+        echo '</tbody></table></div>';
         echo '</div>';
     }
 
@@ -447,18 +538,18 @@ final class AdminController
         $failed = array_filter($checks, static fn (array $c): bool => !$c['ok']);
 
         echo '<div class="edbw-panel">';
-        echo '<h3>Preflight Checks</h3>';
+        echo '<h3>' . htmlspecialchars($this->t('preflight_checks')) . '</h3>';
         echo '<form method="post" class="edbw-form-inline">';
         echo '<input type="hidden" name="tab" value="dashboard">';
         echo '<input type="hidden" name="action" value="run_preflight">';
-        echo '<button class="btn btn-default" type="submit">Retest</button>';
+        echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('retest')) . '</button>';
         echo '</form>';
         echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>Check</th><th>Status</th><th>Details</th></tr></thead><tbody>';
+        echo '<table class="table table-striped"><thead><tr><th>' . htmlspecialchars($this->t('check')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('details')) . '</th></tr></thead><tbody>';
         foreach ($checks as $check) {
             echo '<tr>';
             echo '<td>' . htmlspecialchars($check['name']) . '</td>';
-            echo '<td>' . ($check['ok'] ? '<span class="edbw-badge ok">OK</span>' : '<span class="edbw-badge fail">Missing/Fail</span>') . '</td>';
+            echo '<td>' . ($check['ok'] ? '<span class="edbw-badge ok">OK</span>' : '<span class="edbw-badge fail">' . htmlspecialchars($this->t('missing_fail')) . '</span>') . '</td>';
             echo '<td>' . htmlspecialchars($check['detail']) . '</td>';
             echo '</tr>';
         }
@@ -466,9 +557,9 @@ final class AdminController
         echo '</div>';
 
         if (!empty($failed)) {
-            echo '<div class="alert alert-warning">Module can run, but missing items should be fixed before production traffic enforcement.</div>';
+            echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('preflight_warn')) . '</div>';
         } else {
-            echo '<div class="alert alert-success">All preflight checks passed.</div>';
+            echo '<div class="alert alert-success">' . htmlspecialchars($this->t('preflight_ok')) . '</div>';
         }
         echo '</div>';
     }
@@ -480,7 +571,7 @@ final class AdminController
         $checks[] = ['name' => 'PHP version', 'ok' => $phpOk, 'detail' => 'Current: ' . PHP_VERSION . ', required: >= 8.0'];
 
         $checks[] = ['name' => 'cURL extension', 'ok' => function_exists('curl_init'), 'detail' => function_exists('curl_init') ? 'Available' : 'Missing'];
-        $checks[] = ['name' => 'Git mode capability (shell_exec)', 'ok' => true, 'detail' => 'Not required (release-based updater is active)'];
+        $checks[] = ['name' => 'Update engine', 'ok' => true, 'detail' => 'Release-based updater (no shell command required)'];
         $checks[] = ['name' => 'ZIP extension', 'ok' => class_exists(\ZipArchive::class), 'detail' => class_exists(\ZipArchive::class) ? 'Available' : 'Missing'];
         $checks[] = ['name' => 'Module status', 'ok' => $this->settings->getBool('module_enabled', true), 'detail' => $this->settings->getBool('module_enabled', true) ? 'Enabled' : 'Disabled'];
 
@@ -527,12 +618,12 @@ final class AdminController
         $cronOk = $lastWhmcsCron !== '' && strtotime($lastWhmcsCron) > time() - 360;
 
         return [
-            ['label' => 'Module status', 'value' => $this->settings->getBool('module_enabled', true) ? 'Enabled' : 'Disabled', 'state' => $this->settings->getBool('module_enabled', true) ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 2v10"></path><path d="M6 6a8 8 0 1012 0"></path></svg>'],
-            ['label' => 'Cron status', 'value' => $cronOk ? ('Active (last ping: ' . $lastWhmcsCron . ')') : 'Not running in last 6 minutes', 'state' => $cronOk ? 'ok' : 'error', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>'],
-            ['label' => 'Traffic-limited services', 'value' => (string) $limitedCount, 'state' => $limitedCount > 0 ? 'warn' : 'ok', 'icon' => '<svg viewBox="0 0 24 24"><path d="M4 20h16M7 16h10M10 12h4M12 4v4"></path></svg>'],
-            ['label' => 'Synced (last 1h)', 'value' => (string) $syncedInLastHour, 'state' => $syncedInLastHour > 0 ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M3 12h6l3-8 4 16 3-8h2"></path></svg>'],
-            ['label' => 'Suspended (other reasons)', 'value' => (string) $suspendedOther, 'state' => $suspendedOther > 0 ? 'warn' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>'],
-            ['label' => 'Test Mode', 'value' => $this->settings->getBool('test_mode', false) ? 'Enabled (Dry Run)' : 'Disabled', 'state' => $this->settings->getBool('test_mode', false) ? 'warn' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M6 2h12M9 2v4l-5 8a4 4 0 003.4 6h9.2A4 4 0 0020 14l-5-8V2"></path></svg>'],
+            ['label' => $this->t('rt_module_status'), 'value' => $this->settings->getBool('module_enabled', true) ? $this->t('active') : $this->t('disabled'), 'state' => $this->settings->getBool('module_enabled', true) ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 2v10"></path><path d="M6 6a8 8 0 1012 0"></path></svg>'],
+            ['label' => $this->t('rt_cron_status'), 'value' => $cronOk ? ($this->t('rt_cron_active') . ' (' . $lastWhmcsCron . ')') : $this->t('rt_cron_down'), 'state' => $cronOk ? 'ok' : 'error', 'icon' => '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>'],
+            ['label' => $this->t('rt_traffic_limited'), 'value' => (string) $limitedCount, 'state' => $limitedCount > 0 ? 'warn' : 'ok', 'icon' => '<svg viewBox="0 0 24 24"><path d="M4 20h16M7 16h10M10 12h4M12 4v4"></path></svg>'],
+            ['label' => $this->t('rt_synced_last_hour'), 'value' => (string) $syncedInLastHour, 'state' => $syncedInLastHour > 0 ? 'ok' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M3 12h6l3-8 4 16 3-8h2"></path></svg>'],
+            ['label' => $this->t('rt_suspended_other'), 'value' => (string) $suspendedOther, 'state' => $suspendedOther > 0 ? 'warn' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>'],
+            ['label' => $this->t('rt_test_mode'), 'value' => $this->settings->getBool('test_mode', false) ? $this->t('rt_test_mode_on') : $this->t('rt_test_mode_off'), 'state' => $this->settings->getBool('test_mode', false) ? 'warn' : 'neutral', 'icon' => '<svg viewBox="0 0 24 24"><path d="M6 2h12M9 2v4l-5 8a4 4 0 003.4 6h9.2A4 4 0 0020 14l-5-8V2"></path></svg>'],
         ];
     }
 
@@ -552,11 +643,16 @@ final class AdminController
             'proxy_enabled', 'proxy_type', 'proxy_host', 'proxy_port', 'proxy_username',
         ];
         $allowed = $action === 'save_connection' ? $allowedConnection : $allowedGeneral;
-        $boolKeys = ['use_impersonation', 'autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode', 'proxy_enabled'];
+        $boolKeys = ['autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode', 'proxy_enabled'];
+        $selectBoolKeys = ['use_impersonation'];
 
         foreach ($allowed as $key) {
             if (in_array($key, $boolKeys, true)) {
                 $payload[$key] = isset($_POST[$key]) ? '1' : '0';
+                continue;
+            }
+            if (in_array($key, $selectBoolKeys, true)) {
+                $payload[$key] = ((string) ($_POST[$key] ?? '0')) === '1' ? '1' : '0';
                 continue;
             }
             if (!isset($_POST[$key])) {
@@ -586,26 +682,39 @@ final class AdminController
         }
 
         Settings::saveToDatabase($payload);
-        return ['type' => 'success', 'text' => 'Settings saved successfully.'];
+            return ['type' => 'success', 'text' => $this->t('settings_saved')];
     }
 
     private function testEasyDcimConnection(): array
     {
         try {
-            $baseUrl = $this->settings->getString('easydcim_base_url');
-            $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+            $baseUrl = trim((string) ($_POST['easydcim_base_url'] ?? $this->settings->getString('easydcim_base_url')));
+            $storedToken = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+            $token = trim((string) ($_POST['easydcim_api_token'] ?? ''));
+            if ($token === '') {
+                $token = $storedToken;
+            }
+            $useImpersonation = ((string) ($_POST['use_impersonation'] ?? ($this->settings->getBool('use_impersonation', false) ? '1' : '0'))) === '1';
+            $proxy = [
+                'enabled' => isset($_POST['proxy_enabled']) ? true : $this->settings->getBool('proxy_enabled', false),
+                'type' => trim((string) ($_POST['proxy_type'] ?? $this->settings->getString('proxy_type', 'http'))),
+                'host' => trim((string) ($_POST['proxy_host'] ?? $this->settings->getString('proxy_host'))),
+                'port' => (int) ($_POST['proxy_port'] ?? $this->settings->getInt('proxy_port', 0)),
+                'username' => trim((string) ($_POST['proxy_username'] ?? $this->settings->getString('proxy_username'))),
+                'password' => trim((string) ($_POST['proxy_password'] ?? '')) !== '' ? trim((string) $_POST['proxy_password']) : Crypto::safeDecrypt($this->settings->getString('proxy_password')),
+            ];
             if ($baseUrl === '' || $token === '') {
-                return ['type' => 'warning', 'text' => 'Base URL or API token is missing.'];
+                return ['type' => 'warning', 'text' => $this->t('base_or_token_missing')];
             }
 
-            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+            $client = new EasyDcimClient($baseUrl, $token, $useImpersonation, $this->logger, $proxy);
             if ($client->ping()) {
-                return ['type' => 'success', 'text' => 'EasyDCIM connection is OK.'];
+                return ['type' => 'success', 'text' => $this->t('connection_ok')];
             }
 
-            return ['type' => 'warning', 'text' => 'EasyDCIM is reachable but response is not healthy.'];
+            return ['type' => 'warning', 'text' => $this->t('connection_unhealthy')];
         } catch (\Throwable $e) {
-            return ['type' => 'danger', 'text' => 'EasyDCIM test failed: ' . $e->getMessage()];
+            return ['type' => 'danger', 'text' => $this->t('connection_failed') . ': ' . $e->getMessage()];
         }
     }
 
@@ -1103,6 +1212,180 @@ final class AdminController
         return $out;
     }
 
+    private function getScopedHostingServices(array $easyServiceItems = []): array
+    {
+        $q = Capsule::table('tblhosting as h')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
+            ->leftJoin('mod_easydcim_bw_guard_service_state as s', 's.serviceid', '=', 'h.id')
+            ->select([
+                'h.id as serviceid', 'h.userid', 'h.packageid as pid', 'h.domainstatus', 'h.dedicatedip',
+                'c.firstname', 'c.lastname', 'c.email',
+                's.easydcim_service_id as state_service_id',
+            ]);
+        $this->applyScopeFilter($q);
+        $rows = $q->orderByDesc('h.id')->limit(300)->get();
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        $serviceIds = $rows->pluck('serviceid')->map(static fn ($v): int => (int) $v)->all();
+        $cfVals = $this->getServiceCustomFieldValues($serviceIds);
+
+        $baseUrl = $this->settings->getString('easydcim_base_url');
+        $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+        $apiAvailable = $baseUrl !== '' && $token !== '';
+        $client = null;
+        if ($apiAvailable) {
+            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+        }
+        $easyByIp = [];
+        foreach ($easyServiceItems as $item) {
+            $ip = trim((string) ($item['ip'] ?? ''));
+            if ($ip === '') {
+                continue;
+            }
+            $easyByIp[$ip] = $item;
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            $sid = (int) $r->serviceid;
+            $svcCf = $cfVals[$sid]['easydcim_service_id'] ?? '';
+            $srvCf = $cfVals[$sid]['easydcim_server_id'] ?? '';
+            $resolvedService = $svcCf !== '' ? $svcCf : (string) ($r->state_service_id ?? '');
+            $resolvedServer = $srvCf;
+            $serviceIp = trim((string) ($r->dedicatedip ?? ''));
+            if ($resolvedService === '' && $serviceIp !== '' && isset($easyByIp[$serviceIp])) {
+                $resolvedService = (string) ($easyByIp[$serviceIp]['service_id'] ?? '');
+                if ($resolvedServer === '') {
+                    $resolvedServer = (string) ($easyByIp[$serviceIp]['server_id'] ?? '');
+                }
+            }
+            $portsSummary = $this->t('no_data');
+
+            if ($client instanceof EasyDcimClient) {
+                try {
+                    $email = (string) ($r->email ?? '');
+                    if ($resolvedService !== '') {
+                        $ports = $client->ports($resolvedService, true, $email);
+                    } elseif ($resolvedServer !== '') {
+                        $ports = $client->portsByServer($resolvedServer, true, $email);
+                    } else {
+                        $ports = ['data' => []];
+                    }
+                    $items = $this->extractServiceItems((array) ($ports['data'] ?? []));
+                    if (!empty($items)) {
+                        $up = 0;
+                        $total = count($items);
+                        foreach ($items as $p) {
+                            if (!empty($p['is_up'])) {
+                                $up++;
+                            }
+                        }
+                        $portsSummary = $up . '/' . $total . ' ' . $this->t('ports_up');
+                    } elseif ($resolvedService !== '' || $resolvedServer !== '') {
+                        $portsSummary = $this->t('ports_not_found');
+                    }
+                } catch (\Throwable $e) {
+                    $portsSummary = $this->t('ports_error');
+                }
+            }
+
+            $out[] = [
+                'serviceid' => $sid,
+                'userid' => (int) $r->userid,
+                'pid' => (int) $r->pid,
+                'firstname' => (string) ($r->firstname ?? ''),
+                'lastname' => (string) ($r->lastname ?? ''),
+                'ip' => (string) ($r->dedicatedip ?? ''),
+                'easydcim_service_id' => $resolvedService,
+                'easydcim_server_id' => $resolvedServer,
+                'ports_summary' => $portsSummary,
+            ];
+        }
+
+        return $out;
+    }
+
+    private function getServiceCustomFieldValues(array $serviceIds): array
+    {
+        if (empty($serviceIds)) {
+            return [];
+        }
+
+        $fields = Capsule::table('tblcustomfields')
+            ->where('type', 'product')
+            ->get(['id', 'fieldname']);
+        $fieldById = [];
+        foreach ($fields as $f) {
+            $normalized = strtolower(trim(explode('|', (string) $f->fieldname)[0]));
+            if (!in_array($normalized, ['easydcim_service_id', 'easydcim_order_id', 'easydcim_server_id'], true)) {
+                continue;
+            }
+            $fieldById[(int) $f->id] = $normalized;
+        }
+        if (empty($fieldById)) {
+            return [];
+        }
+
+        $values = Capsule::table('tblcustomfieldsvalues')
+            ->whereIn('relid', $serviceIds)
+            ->whereIn('fieldid', array_keys($fieldById))
+            ->get(['relid', 'fieldid', 'value']);
+        $out = [];
+        foreach ($values as $v) {
+            $serviceId = (int) $v->relid;
+            $name = $fieldById[(int) $v->fieldid] ?? '';
+            if ($name === '') {
+                continue;
+            }
+            $out[$serviceId][$name] = trim((string) $v->value);
+        }
+        return $out;
+    }
+
+    private function extractServiceItems(array $payload): array
+    {
+        $items = [];
+        if (isset($payload['data']) && is_array($payload['data'])) {
+            $items = $payload['data'];
+        } elseif (isset($payload['result']) && is_array($payload['result'])) {
+            $items = $payload['result'];
+        } elseif (array_keys($payload) === range(0, count($payload) - 1)) {
+            $items = $payload;
+        } else {
+            $items = [$payload];
+        }
+
+        $normalized = [];
+        foreach ($items as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $state = strtolower((string) ($row['status'] ?? $row['state'] ?? ''));
+            $upRaw = $row['is_up'] ?? $row['up'] ?? null;
+            $isUp = false;
+            if (is_bool($upRaw)) {
+                $isUp = $upRaw;
+            } elseif (is_numeric($upRaw)) {
+                $isUp = (int) $upRaw === 1;
+            } elseif (is_string($upRaw) && $upRaw !== '') {
+                $isUp = in_array(strtolower($upRaw), ['1', 'true', 'up', 'active', 'enabled', 'online'], true);
+            } else {
+                $isUp = in_array($state, ['up', 'active', 'enabled', 'online'], true);
+            }
+            $normalized[] = [
+                'service_id' => (string) ($row['id'] ?? $row['service_id'] ?? ''),
+                'server_id' => (string) ($row['server_id'] ?? $row['device_id'] ?? $row['item_id'] ?? ''),
+                'ip' => (string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? ''),
+                'status' => (string) ($row['status'] ?? $row['state'] ?? ''),
+                'is_up' => $isUp,
+            ];
+        }
+        return $normalized;
+    }
+
     private function proxyConfig(): array
     {
         return [
@@ -1123,8 +1406,128 @@ final class AdminController
             'tab_connection' => 'Easy DCIM',
             'tab_settings' => 'تنظیمات',
             'tab_scope' => 'سرویس/گروه',
+            'tab_servers' => 'سرورها',
             'tab_packages' => 'پکیج‌ها',
             'tab_logs' => 'لاگ‌ها',
+            'easy_connection' => 'اتصال EasyDCIM',
+            'base_url' => 'آدرس Base',
+            'api_token' => 'توکن API ادمین',
+            'keep_secret' => 'برای نگه داشتن مقدار فعلی خالی بگذارید',
+            'access_mode' => 'حالت دسترسی API',
+            'restricted_mode' => 'Restricted Mode (محدود)',
+            'unrestricted_mode' => 'Unrestricted Mode (بدون محدودیت)',
+            'proxy_title' => 'تنظیمات پروکسی',
+            'proxy_enable' => 'فعال‌سازی پروکسی',
+            'proxy_type' => 'نوع پروکسی',
+            'proxy_host' => 'هاست پروکسی',
+            'proxy_port' => 'پورت پروکسی',
+            'proxy_user' => 'نام کاربری پروکسی',
+            'proxy_pass' => 'رمز پروکسی',
+            'save_connection' => 'ذخیره اتصال',
+            'test_connection' => 'تست اتصال EasyDCIM',
+            'module_settings' => 'تنظیمات ماژول',
+            'module_status' => 'وضعیت ماژول',
+            'active' => 'فعال',
+            'disabled' => 'غیرفعال',
+            'module_status_help' => 'بدون حذف داده‌ها، موقت غیرفعال می‌شود.',
+            'ui_language' => 'زبان رابط',
+            'lang_default' => 'پیش‌فرض',
+            'poll_interval' => 'فاصله Poll (دقیقه)',
+            'graph_cache' => 'کش گراف (دقیقه)',
+            'autobuy_enabled' => 'خرید خودکار فعال',
+            'autobuy_threshold' => 'آستانه خرید خودکار (GB)',
+            'autobuy_package' => 'Package ID پیش‌فرض خرید خودکار',
+            'autobuy_max' => 'حداکثر خرید خودکار در سیکل',
+            'update_source' => 'منبع آپدیت',
+            'update_mode' => 'حالت آپدیت',
+            'direction_mapping' => 'نگاشت جهت ترافیک',
+            'normal' => 'عادی',
+            'swap_in_out' => 'جابجایی IN/OUT',
+            'direction_mapping_help' => 'اگر IN/OUT در شبکه شما برعکس است، این گزینه را روی Swap بگذارید.',
+            'default_calc_mode' => 'حالت محاسبه پیش‌فرض',
+            'test_mode' => 'حالت تست (Dry Run)',
+            'test_mode_help' => 'هیچ دستور واقعی برای قطع/وصل ارسال نمی‌شود و فقط در لاگ ثبت می‌شود.',
+            'log_retention' => 'نگهداری لاگ (روز)',
+            'preflight_strict' => 'Preflight سخت‌گیرانه',
+            'purge_on_deactivate' => 'پاکسازی کامل هنگام غیرفعال‌سازی',
+            'purge_on_deactivate_help' => 'با فعال بودن این گزینه، جداول ماژول هنگام deactivate حذف می‌شوند.',
+            'save_settings' => 'ذخیره تنظیمات',
+            'managed_scope' => 'محدوده مدیریت',
+            'managed_pids' => 'PIDهای مدیریت‌شده',
+            'managed_gids' => 'GIDهای مدیریت‌شده',
+            'comma_pids' => 'شناسه محصولات را با کاما جدا کنید',
+            'comma_gids' => 'شناسه گروه‌ها را با کاما جدا کنید',
+            'save_scope' => 'ذخیره محدوده',
+            'loaded_products' => 'تعداد محصول بارگذاری‌شده در محدوده',
+            'plan_quotas' => 'سقف پلن‌ها (IN / OUT / TOTAL)',
+            'plan_quotas_help' => 'هر ردیف با تغییرات شما خودکار ذخیره می‌شود. دکمه پایین برای ذخیره همه ردیف‌هاست.',
+            'product' => 'محصول',
+            'cf_check' => 'بررسی CF',
+            'unlimited_label' => 'نامحدود (IN/OUT/TOTAL)',
+            'action' => 'اقدام',
+            'disable_ports' => 'بستن پورت‌ها',
+            'suspend' => 'تعلیق سرویس',
+            'both' => 'هر دو',
+            'save_all_plans' => 'ذخیره همه پلن‌ها',
+            'saved' => 'ذخیره شد',
+            'save_failed' => 'ذخیره ناموفق بود',
+            'all_rows_saved' => 'همه ردیف‌ها ذخیره شدند',
+            'settings_saved' => 'تنظیمات با موفقیت ذخیره شد.',
+            'base_or_token_missing' => 'Base URL یا API Token وارد نشده است.',
+            'connection_ok' => 'اتصال EasyDCIM صحیح است.',
+            'connection_unhealthy' => 'EasyDCIM در دسترس است ولی پاسخ سالم نیست.',
+            'connection_failed' => 'تست اتصال ناموفق بود',
+            'servers_tab_title' => 'سرورها و سرویس‌های EasyDCIM',
+            'servers_api_missing' => 'برای نمایش لیست سرورهای EasyDCIM ابتدا Base URL و API Token را تنظیم کنید.',
+            'servers_api_loaded' => 'تعداد آیتم دریافتی از EasyDCIM',
+            'servers_assigned' => 'سرویس‌های واگذار شده به مشتری',
+            'servers_unassigned' => 'سرویس‌های آزاد (بدون اتصال به WHMCS)',
+            'service' => 'سرویس',
+            'client' => 'مشتری',
+            'ports_status' => 'وضعیت پورت‌ها',
+            'ports_up' => 'پورت بالا',
+            'ports_not_found' => 'پورتی پیدا نشد',
+            'ports_error' => 'خطا در بررسی پورت',
+            'status' => 'وضعیت',
+            'no_rows' => 'موردی یافت نشد',
+            'm_version' => 'نسخه',
+            'm_commit' => 'کامیت',
+            'm_update_status' => 'وضعیت آپدیت',
+            'm_release_status' => 'وضعیت ریلیز',
+            'm_cron_poll' => 'آخرین Poll',
+            'm_api_fail_count' => 'تعداد خطای API',
+            'm_update_lock' => 'قفل آپدیت',
+            'm_connection' => 'وضعیت اتصال EasyDCIM',
+            'm_latest_release' => 'آخرین ریلیز',
+            'm_update_available' => 'آپدیت موجود است',
+            'm_uptodate' => 'به‌روز',
+            'm_no_data' => 'بدون داده',
+            'm_locked' => 'قفل شده',
+            'm_free' => 'آزاد',
+            'm_configured' => 'تنظیم شده',
+            'm_not_configured' => 'تنظیم نشده',
+            'm_unknown' => 'نامشخص',
+            'update_actions' => 'اقدامات آپدیت',
+            'check_update_now' => 'بررسی آپدیت',
+            'apply_latest_release' => 'اعمال آخرین ریلیز',
+            'no_data' => 'بدون داده',
+            'preflight_checks' => 'بررسی‌های پیش از اجرا',
+            'retest' => 'تست مجدد',
+            'check' => 'چک',
+            'details' => 'جزئیات',
+            'missing_fail' => 'ناموجود/خطا',
+            'preflight_warn' => 'ماژول اجرا می‌شود اما برای محیط پروداکشن، موارد ناقص را برطرف کنید.',
+            'preflight_ok' => 'همه بررسی‌ها با موفقیت پاس شدند.',
+            'rt_module_status' => 'وضعیت ماژول',
+            'rt_cron_status' => 'وضعیت کرون',
+            'rt_cron_active' => 'فعال (آخرین پینگ)',
+            'rt_cron_down' => 'در ۶ دقیقه اخیر اجرا نشده',
+            'rt_traffic_limited' => 'سرویس‌های محدودشده بر اساس ترافیک',
+            'rt_synced_last_hour' => 'همگام‌سازی در ۱ ساعت اخیر',
+            'rt_suspended_other' => 'تعلیق‌شده (سایر دلایل)',
+            'rt_test_mode' => 'حالت تست',
+            'rt_test_mode_on' => 'فعال (Dry Run)',
+            'rt_test_mode_off' => 'غیرفعال',
         ];
         $en = [
             'subtitle' => 'Bandwidth control center for EasyDCIM services',
@@ -1132,8 +1535,128 @@ final class AdminController
             'tab_connection' => 'Easy DCIM',
             'tab_settings' => 'Settings',
             'tab_scope' => 'Services / Group',
+            'tab_servers' => 'Servers',
             'tab_packages' => 'Packages',
             'tab_logs' => 'Logs',
+            'easy_connection' => 'EasyDCIM Connection',
+            'base_url' => 'Base URL',
+            'api_token' => 'Admin API Token',
+            'keep_secret' => 'Leave empty to keep current value',
+            'access_mode' => 'API Access Mode',
+            'restricted_mode' => 'Restricted Mode',
+            'unrestricted_mode' => 'Unrestricted Mode',
+            'proxy_title' => 'Proxy Settings',
+            'proxy_enable' => 'Enable Proxy',
+            'proxy_type' => 'Proxy Type',
+            'proxy_host' => 'Proxy Host',
+            'proxy_port' => 'Proxy Port',
+            'proxy_user' => 'Proxy Username',
+            'proxy_pass' => 'Proxy Password',
+            'save_connection' => 'Save Connection',
+            'test_connection' => 'Test EasyDCIM Connection',
+            'module_settings' => 'Module Settings',
+            'module_status' => 'Module Status',
+            'active' => 'Active',
+            'disabled' => 'Disabled',
+            'module_status_help' => 'Disable temporarily without losing data.',
+            'ui_language' => 'UI Language',
+            'lang_default' => 'Default',
+            'poll_interval' => 'Poll Interval (min)',
+            'graph_cache' => 'Graph Cache (min)',
+            'autobuy_enabled' => 'Auto-Buy Enabled',
+            'autobuy_threshold' => 'Auto-Buy Threshold GB',
+            'autobuy_package' => 'Auto-Buy Default Package ID',
+            'autobuy_max' => 'Auto-Buy Max/Cycle',
+            'update_source' => 'Update Source',
+            'update_mode' => 'Update Mode',
+            'direction_mapping' => 'Direction Mapping',
+            'normal' => 'Normal',
+            'swap_in_out' => 'Swap IN/OUT',
+            'direction_mapping_help' => 'Use swap if EasyDCIM IN/OUT is reversed on your network devices.',
+            'default_calc_mode' => 'Default Calculation Mode',
+            'test_mode' => 'Test Mode (Dry Run)',
+            'test_mode_help' => 'No real suspend/disable/enable/unsuspend calls; logs show what would be sent.',
+            'log_retention' => 'Log Retention (days)',
+            'preflight_strict' => 'Preflight Strict Mode',
+            'purge_on_deactivate' => 'Purge Data On Deactivate',
+            'purge_on_deactivate_help' => 'If enabled, all module tables are deleted on deactivate.',
+            'save_settings' => 'Save Settings',
+            'managed_scope' => 'Managed Scope',
+            'managed_pids' => 'Managed PIDs',
+            'managed_gids' => 'Managed GIDs',
+            'comma_pids' => 'Comma separated product IDs',
+            'comma_gids' => 'Comma separated group IDs',
+            'save_scope' => 'Save Scope',
+            'loaded_products' => 'Loaded products by current scope',
+            'plan_quotas' => 'Plan Quotas (IN / OUT / TOTAL)',
+            'plan_quotas_help' => 'Rows auto-save on change. Use the bottom button to save all rows in one click.',
+            'product' => 'Product',
+            'cf_check' => 'CF Check',
+            'unlimited_label' => 'Unlimited IN/OUT/TOTAL',
+            'action' => 'Action',
+            'disable_ports' => 'Disable Ports',
+            'suspend' => 'Suspend',
+            'both' => 'Both',
+            'save_all_plans' => 'Save All Plans',
+            'saved' => 'Saved',
+            'save_failed' => 'Save failed',
+            'all_rows_saved' => 'All rows saved',
+            'settings_saved' => 'Settings saved successfully.',
+            'base_or_token_missing' => 'Base URL or API token is missing.',
+            'connection_ok' => 'EasyDCIM connection is OK.',
+            'connection_unhealthy' => 'EasyDCIM is reachable but response is not healthy.',
+            'connection_failed' => 'EasyDCIM test failed',
+            'servers_tab_title' => 'EasyDCIM Servers and Services',
+            'servers_api_missing' => 'Configure EasyDCIM Base URL and API token to load server list.',
+            'servers_api_loaded' => 'Items loaded from EasyDCIM',
+            'servers_assigned' => 'Assigned Services (WHMCS mapped)',
+            'servers_unassigned' => 'Unassigned Services (not mapped to WHMCS)',
+            'service' => 'Service',
+            'client' => 'Client',
+            'ports_status' => 'Ports Status',
+            'ports_up' => 'ports up',
+            'ports_not_found' => 'No ports found',
+            'ports_error' => 'Port lookup failed',
+            'status' => 'Status',
+            'no_rows' => 'No rows found',
+            'm_version' => 'Version',
+            'm_commit' => 'Commit',
+            'm_update_status' => 'Update Status',
+            'm_release_status' => 'Release Status',
+            'm_cron_poll' => 'Cron Poll',
+            'm_api_fail_count' => 'API Fail Count',
+            'm_update_lock' => 'Update Lock',
+            'm_connection' => 'EasyDCIM Connection',
+            'm_latest_release' => 'Latest Release',
+            'm_update_available' => 'Update available',
+            'm_uptodate' => 'Up to date',
+            'm_no_data' => 'No data',
+            'm_locked' => 'Locked',
+            'm_free' => 'Free',
+            'm_configured' => 'Configured',
+            'm_not_configured' => 'Not configured',
+            'm_unknown' => 'Unknown',
+            'update_actions' => 'Update Actions',
+            'check_update_now' => 'Check Update Now',
+            'apply_latest_release' => 'Apply Latest Release',
+            'no_data' => 'No data',
+            'preflight_checks' => 'Preflight Checks',
+            'retest' => 'Retest',
+            'check' => 'Check',
+            'details' => 'Details',
+            'missing_fail' => 'Missing/Fail',
+            'preflight_warn' => 'Module can run, but missing items should be fixed before production traffic enforcement.',
+            'preflight_ok' => 'All preflight checks passed.',
+            'rt_module_status' => 'Module status',
+            'rt_cron_status' => 'Cron status',
+            'rt_cron_active' => 'Active (last ping)',
+            'rt_cron_down' => 'Not running in last 6 minutes',
+            'rt_traffic_limited' => 'Traffic-limited services',
+            'rt_synced_last_hour' => 'Synced (last 1h)',
+            'rt_suspended_other' => 'Suspended (other reasons)',
+            'rt_test_mode' => 'Test Mode',
+            'rt_test_mode_on' => 'Enabled (Dry Run)',
+            'rt_test_mode_off' => 'Disabled',
         ];
         $map = $this->isFa ? $fa : $en;
         return $map[$key] ?? $key;

@@ -2,6 +2,22 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.21] - 2026-02-19
+### Added
+- New `Servers` tab with two sections: WHMCS-mapped services and unassigned EasyDCIM services.
+- Server/service matching fallback by client/service IP when EasyDCIM IDs are not already stored.
+- Port status summary in servers view (up count / total) with service/server fallback lookup.
+### Changed
+- Scope plan editor now uses robust row-based AJAX autosave with explicit save feedback and a working `Save All Plans` action.
+- Unlimited toggles now reliably disable and gray out paired quota fields.
+- Connection access naming changed to clearer mode labels: `Restricted Mode` / `Unrestricted Mode`.
+- EasyDCIM connection test now works with current form values even before saving.
+- Admin RTL behavior improved for Persian UI rendering and layout consistency.
+- Dashboard, settings, scope, and preflight sections expanded with Persian translations and clearer labels.
+### Fixed
+- Removed remaining practical dependency messaging around git shell mode from health checks (release updater is shell-free).
+- Corrected invalid scope table form markup that caused inconsistent save/disable behavior in some browsers.
+
 ## [1.20] - 2026-02-19
 ### Added
 - Renamed tabs to `Easy DCIM` and `Services / Group` for clearer navigation.

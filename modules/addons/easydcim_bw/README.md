@@ -2,7 +2,7 @@
 
 Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git updates, and complete traffic purchase audit logs.
 
-Current version: `1.20`
+Current version: `1.21`
 
 ## Key Features
 
@@ -14,7 +14,7 @@ Current version: `1.20`
 - Strict additive/idempotent migrations only on `mod_easydcim_bw_guard_*` tables.
 - Deactivate keeps all module data/settings by default; optional `Purge Data On Deactivate` removes only module tables/settings.
 - Purchase logs include invoice, cycle window, reset date, actor, and timestamp.
-- Admin UI is tab-based (`Dashboard`, `Settings`, `Packages`, `Logs`) with color-coded status cards.
+- Admin UI is tab-based (`Dashboard`, `Easy DCIM`, `Settings`, `Services / Group`, `Servers`, `Packages`, `Logs`) with color-coded status cards.
 - Test mode (dry run) logs intended enforcement commands without sending real suspend/port actions.
 - Configurable log retention with automatic cleanup in cron and manual cleanup in Logs tab.
 - Added `Scope` tab for managed `PID/GID` and per-plan quota rules (`IN/OUT/TOTAL` + unlimited toggles).

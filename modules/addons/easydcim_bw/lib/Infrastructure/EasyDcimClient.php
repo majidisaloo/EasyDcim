@@ -91,6 +91,11 @@ final class EasyDcimClient
         return ($result['http_code'] ?? 0) >= 200 && ($result['http_code'] ?? 0) < 500;
     }
 
+    public function listServices(?string $impersonateUser = null): array
+    {
+        return $this->request('GET', '/api/v3/client/services', null, $impersonateUser, false);
+    }
+
     private function request(string $method, string $path, ?array $body = null, ?string $impersonateUser = null, bool $throwOnError = true): array
     {
         $url = $this->baseUrl . $path;

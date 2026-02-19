@@ -128,6 +128,10 @@ final class AdminController
             $flash[] = $this->refreshServersCacheNow();
             $tab = 'servers';
         }
+        if ($action === 'test_all_services') {
+            $flash[] = $this->testAllServices();
+            $tab = 'servers';
+        }
 
         // Keep admin load non-blocking: avoid automatic outbound checks on every page view.
         $this->settings = new Settings(Settings::loadFromDatabase());
@@ -468,7 +472,12 @@ final class AdminController
             echo '<form method="post" class="edbw-form-inline">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="refresh_servers_cache">';
-            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_sync_now')) . '</button>';
+            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_refresh_cache')) . '</button>';
+            echo '</form>';
+            echo '<form method="post" class="edbw-form-inline">';
+            echo '<input type="hidden" name="tab" value="servers">';
+            echo '<input type="hidden" name="action" value="test_all_services">';
+            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all')) . '</button>';
             echo '</form>';
             if (count($easyServices) === 0 && $cacheAt === '') {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
@@ -2175,10 +2184,118 @@ final class AdminController
                 ['meta_key' => 'servers_list_cache_at'],
                 ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
             );
-            return ['type' => 'success', 'text' => $this->t('servers_cache_refreshed') . ': ' . count($items)];
+            $mapped = $this->persistResolvedMappings($this->getScopedHostingServices($items, false, false));
+            return ['type' => 'success', 'text' => $this->t('servers_cache_refreshed') . ': ' . count($items) . ' | ' . $this->t('servers_mapping_updated') . ': ' . $mapped];
         } catch (\Throwable $e) {
             $this->logger->log('WARNING', 'servers_cache_refresh_failed', ['error' => $e->getMessage()]);
             return ['type' => 'danger', 'text' => $this->t('servers_cache_refresh_failed') . ': ' . $e->getMessage()];
+        }
+    }
+
+    private function persistResolvedMappings(array $services): int
+    {
+        $updated = 0;
+        foreach ($services as $svc) {
+            $whmcsServiceId = (int) ($svc['serviceid'] ?? 0);
+            $userId = (int) ($svc['userid'] ?? 0);
+            $serviceId = trim((string) ($svc['easydcim_service_id'] ?? ''));
+            $orderId = trim((string) ($svc['easydcim_order_id'] ?? ''));
+            $serverId = trim((string) ($svc['easydcim_server_id'] ?? ''));
+            if ($whmcsServiceId <= 0 || $userId <= 0) {
+                continue;
+            }
+            if ($serviceId === '' && $orderId === '' && $serverId === '') {
+                continue;
+            }
+
+            $existing = Capsule::table('mod_easydcim_bw_guard_service_state')->where('serviceid', $whmcsServiceId)->first();
+            if ($existing) {
+                $changes = [];
+                if ($serviceId !== '' && trim((string) ($existing->easydcim_service_id ?? '')) !== $serviceId) {
+                    $changes['easydcim_service_id'] = $serviceId;
+                }
+                if ($orderId !== '' && trim((string) ($existing->easydcim_order_id ?? '')) !== $orderId) {
+                    $changes['easydcim_order_id'] = $orderId;
+                }
+                if ($serverId !== '' && trim((string) ($existing->easydcim_server_id ?? '')) !== $serverId) {
+                    $changes['easydcim_server_id'] = $serverId;
+                }
+                if (!empty($changes)) {
+                    $changes['updated_at'] = date('Y-m-d H:i:s');
+                    Capsule::table('mod_easydcim_bw_guard_service_state')->where('serviceid', $whmcsServiceId)->update($changes);
+                    $updated++;
+                }
+                continue;
+            }
+
+            if ($serviceId === '') {
+                continue;
+            }
+
+            Capsule::table('mod_easydcim_bw_guard_service_state')->insert([
+                'serviceid' => $whmcsServiceId,
+                'userid' => $userId,
+                'easydcim_service_id' => $serviceId,
+                'easydcim_order_id' => $orderId !== '' ? $orderId : null,
+                'easydcim_server_id' => $serverId !== '' ? $serverId : null,
+                'base_quota_gb' => 0,
+                'mode' => 'TOTAL',
+                'action' => 'disable_ports',
+                'last_used_gb' => 0,
+                'last_remaining_gb' => 0,
+                'last_status' => 'ok',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $updated++;
+        }
+        return $updated;
+    }
+
+    private function testAllServices(): array
+    {
+        try {
+            if (function_exists('set_time_limit')) {
+                @set_time_limit(180);
+            }
+            $services = $this->getScopedHostingServices($this->getEasyServicesCacheOnly(), false, false);
+            if (empty($services)) {
+                return ['type' => 'warning', 'text' => $this->t('no_rows')];
+            }
+
+            $original = $_POST['test_serviceid'] ?? null;
+            $ok = 0;
+            $warn = 0;
+            $fail = 0;
+            foreach ($services as $svc) {
+                $id = (int) ($svc['serviceid'] ?? 0);
+                if ($id <= 0) {
+                    continue;
+                }
+                $_POST['test_serviceid'] = (string) $id;
+                $result = $this->testServiceItem();
+                $type = (string) ($result['type'] ?? 'warning');
+                if ($type === 'success') {
+                    $ok++;
+                } elseif ($type === 'danger') {
+                    $fail++;
+                } else {
+                    $warn++;
+                }
+            }
+            if ($original === null) {
+                unset($_POST['test_serviceid']);
+            } else {
+                $_POST['test_serviceid'] = $original;
+            }
+
+            return [
+                'type' => $fail > 0 ? 'warning' : 'success',
+                'text' => $this->t('servers_test_all_done') . ' | OK: ' . $ok . ' | WARN: ' . $warn . ' | FAIL: ' . $fail,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'servers_test_all_failed', ['error' => $e->getMessage()]);
+            return ['type' => 'danger', 'text' => $this->t('servers_test_all_failed') . ': ' . $e->getMessage()];
         }
     }
 
@@ -2791,10 +2908,15 @@ final class AdminController
             'rt_test_mode_off' => 'غیرفعال',
             'health_runtime_title' => 'وضعیت اجرا و کرون',
             'servers_cache_at' => 'آخرین به‌روزرسانی کش سرورها',
+            'servers_refresh_cache' => 'کش و تکمیل شناسه‌ها',
+            'servers_test_all' => 'تست همه',
             'servers_sync_now' => 'همگام‌سازی سرورها (دستی)',
             'servers_cache_empty_hint' => 'کش سرورها خالی است. برای جلوگیری از کندی، لیست با همگام‌سازی دستی یا کرون پر می‌شود.',
             'servers_cache_refreshed' => 'کش سرورها به‌روزرسانی شد',
             'servers_cache_refresh_failed' => 'به‌روزرسانی کش سرورها ناموفق بود',
+            'servers_mapping_updated' => 'شناسه‌های تکمیل/به‌روز شده',
+            'servers_test_all_done' => 'تست همه سرویس‌ها انجام شد',
+            'servers_test_all_failed' => 'تست همه سرویس‌ها ناموفق بود',
         ];
         $en = [
             'subtitle' => 'Bandwidth control center for EasyDCIM services',
@@ -2979,10 +3101,15 @@ final class AdminController
             'rt_test_mode_off' => 'Disabled',
             'health_runtime_title' => 'Runtime and Cron Status',
             'servers_cache_at' => 'Servers cache last update',
+            'servers_refresh_cache' => 'Refresh Cache + Complete IDs',
+            'servers_test_all' => 'Test All',
             'servers_sync_now' => 'Sync servers now',
             'servers_cache_empty_hint' => 'Servers cache is empty. To avoid page slowness, list is loaded by manual sync or cron.',
             'servers_cache_refreshed' => 'Servers cache refreshed',
             'servers_cache_refresh_failed' => 'Servers cache refresh failed',
+            'servers_mapping_updated' => 'IDs completed/updated',
+            'servers_test_all_done' => 'All services test completed',
+            'servers_test_all_failed' => 'All services test failed',
         ];
         $map = $this->isFa ? $fa : $en;
         return $map[$key] ?? $key;

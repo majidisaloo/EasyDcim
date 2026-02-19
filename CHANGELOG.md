@@ -2,6 +2,15 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.48] - 2026-02-19
+### Added
+- Added `Test All` action in Servers tab to run row test for all scoped services in one click and summarize `OK/WARN/FAIL`.
+### Changed
+- Renamed Servers refresh action label to clarify it refreshes cache and completes missing mappings.
+- Servers cache refresh now also persists resolved `service/order/server` mappings into module service-state where possible.
+### Fixed
+- Added missing i18n keys for new Servers actions and status messages in both Persian and English.
+
 ## [1.47] - 2026-02-19
 ### Fixed
 - Servers cache builder now ignores non-2xx `admin/orders` pages and filters out non-order payloads to prevent fake `items=1` cases and incomplete cache results.

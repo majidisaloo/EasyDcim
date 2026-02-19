@@ -2,7 +2,7 @@
 
 Production-safe WHMCS addon for cycle-aware traffic enforcement, one-click Git updates, and complete traffic purchase audit logs.
 
-Current version: `1.37`
+Current version: `1.38`
 
 ## Key Features
 

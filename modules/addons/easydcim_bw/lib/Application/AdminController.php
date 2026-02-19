@@ -1192,6 +1192,9 @@ final class AdminController
             $code = (int) ($response['http_code'] ?? 0);
             $err = trim((string) ($response['error'] ?? ''));
             $ok = $code >= 200 && $code < 300;
+            if ($mode === 'none' && $err === '') {
+                $err = $this->isFa ? 'Service ID از روی Order ID پیدا نشد' : 'Service ID was not resolved from order';
+            }
 
             $this->logger->log($ok ? 'INFO' : 'WARNING', 'server_item_test', [
                 'serviceid' => $serviceId,
@@ -2008,17 +2011,53 @@ final class AdminController
                 $this->logger->log('INFO', 'resolved_service_id_from_order', [
                     'order_id' => $orderId,
                     'service_id' => $id,
+                    'via' => 'admin_order_details',
                     'http_code' => (int) ($details['http_code'] ?? 0),
                 ]);
+                return $id;
             }
-            return $id;
         } catch (\Throwable $e) {
             $this->logger->log('WARNING', 'resolve_service_id_from_order_failed', [
                 'order_id' => $orderId,
                 'error' => $e->getMessage(),
             ]);
-            return '';
         }
+
+        // fallback: scan client/services pages and match order_id
+        try {
+            for ($page = 1; $page <= 3; $page++) {
+                $resp = $client->listServices(null, ['page' => $page, 'per_page' => 100]);
+                $items = $this->extractServiceItems((array) ($resp['data'] ?? []));
+                foreach ($items as $item) {
+                    if (trim((string) ($item['order_id'] ?? '')) !== $orderId) {
+                        continue;
+                    }
+                    $sid = trim((string) ($item['service_id'] ?? ''));
+                    if ($sid === '') {
+                        continue;
+                    }
+                    $this->logger->log('INFO', 'resolved_service_id_from_order', [
+                        'order_id' => $orderId,
+                        'service_id' => $sid,
+                        'via' => 'client_services_scan',
+                        'http_code' => (int) ($resp['http_code'] ?? 0),
+                        'page' => $page,
+                    ]);
+                    return $sid;
+                }
+                if (count($items) < 100) {
+                    break;
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'resolve_service_id_from_order_scan_failed', [
+                'order_id' => $orderId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->logger->log('WARNING', 'resolve_service_id_from_order_empty', ['order_id' => $orderId]);
+        return '';
     }
 
     private function findServiceIdRecursive($value): string

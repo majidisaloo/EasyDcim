@@ -2,6 +2,16 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.38] - 2026-02-19
+### Fixed
+- `Servers -> Test` no longer returns ambiguous `HTTP 0` when service ID is missing; now reports explicit unresolved-service reason.
+- Added order-to-service fallback scan through `client/services` pages when `admin/orders/{id}` does not expose `service_id`.
+### Added
+- New diagnostics logs for unresolved cases:
+  - `resolve_service_id_from_order_scan_failed`
+  - `resolve_service_id_from_order_empty`
+  - `resolved_service_id_from_order` now includes `via` source.
+
 ## [1.37] - 2026-02-19
 ### Fixed
 - Immediate updater now fails explicitly if no files are actually written (prevents false-success message).

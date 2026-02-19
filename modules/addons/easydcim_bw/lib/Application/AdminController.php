@@ -666,13 +666,14 @@ final class AdminController
                 . 'if(invalidState||(j&&j.type==="danger"&&expectedWork)){pauseWithMessage((j&&j.message)?j.message:"' . addslashes($this->t('servers_test_all_failed')) . '",true);return;}'
                 . 'if(j && j.state && ((j.state.running)||((j.state.total||0)>(j.state.done||0))) && running){timer=setTimeout(tick,700);}else if(expectedWork){pauseWithMessage("' . addslashes($this->t('servers_test_all_progress')) . ' - ' . addslashes($this->t('servers_test_all_continue')) . '",false);}else{running=false;setRunning(false);}})'
                 . '.catch(function(){pauseWithMessage("' . addslashes($this->t('servers_test_all_failed')) . '",true);});}'
-                . 'function bindContinue(){if(!formCont){return;}formCont.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}running=true;tick();});}'
-                . 'function bindReload(form){if(!form){return;}form.addEventListener("submit",function(){running=false;if(timer){clearTimeout(timer);timer=null;}});}'
-                . 'bindContinue();'
-                . 'bindReload(formTest);'
-                . 'bindReload(formStop);'
-                . 'bindReload(formReset);'
-                . 'bindReload(formRefresh);'
+                . 'function bindActions(){'
+                . 'if(formTest){formTest.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}running=true;setRunning(true);noProgressTicks=0;call("test").then(function(j){render(j);if(running){timer=setTimeout(tick,700);}}).catch(function(){pauseWithMessage("' . addslashes($this->t('servers_test_all_failed')) . '",true);});});}'
+                . 'if(formCont){formCont.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}running=true;setRunning(true);noProgressTicks=0;tick();});}'
+                . 'if(formStop){formStop.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}call("stop").then(function(j){render(j);running=false;setRunning(false);});});}'
+                . 'if(formReset){formReset.addEventListener("submit",function(ev){ev.preventDefault();if(timer){clearTimeout(timer);timer=null;}call("reset").then(function(j){render(j);running=false;setRunning(false);});});}'
+                . 'if(formRefresh){formRefresh.addEventListener("submit",function(ev){ev.preventDefault();call("refresh").then(function(j){render(j);});});}'
+                . '}'
+                . 'bindActions();'
                 . 'setRunning(running);'
                 . 'if(!running && initTotal>initDone){running=true;setRunning(true);}'
                 . 'if(running){timer=setTimeout(tick,700);}'
@@ -3388,6 +3389,24 @@ final class AdminController
             $httpCode = (int) ($details['http_code'] ?? 0);
             $reachable = $httpCode >= 200 && $httpCode < 300;
             $items = $this->extractPortsRecursive($data);
+            if (empty($items) && $reachable) {
+                $orderPortsResp = $client->orderPorts($orderId, true);
+                $orderPortsCode = (int) ($orderPortsResp['http_code'] ?? 0);
+                if ($orderPortsCode >= 200 && $orderPortsCode < 300) {
+                    $items = $this->extractPortItems((array) ($orderPortsResp['data'] ?? []));
+                    if (!empty($items)) {
+                        $this->logger->log('INFO', 'resolved_ports_from_order', [
+                            'order_id' => $orderId,
+                            'count' => count($items),
+                            'http_code' => $orderPortsCode,
+                            'via' => 'admin_order_ports_endpoint',
+                        ]);
+                        $result = ['ok' => true, 'reachable' => true, 'items' => $items];
+                        $this->orderPortsRuntimeCache[$orderId] = $result;
+                        return $result;
+                    }
+                }
+            }
             if (!empty($items)) {
                 $this->logger->log('INFO', 'resolved_ports_from_order', [
                     'order_id' => $orderId,
@@ -3755,14 +3774,15 @@ final class AdminController
             'number', 'port_number', 'user_label', 'connection', 'connection_item',
             'connected_port_id', 'conn_port_id', 'conn_port',
             'connected_item_id', 'conn_item_id', 'conn_item',
-            'admin_state', 'oper_state', 'speed', 'vlan', 'vlans',
+            'connected_port_label', 'connected_port_name',
+            'admin_state', 'oper_state', 'speed', 'vlan', 'vlans', 'duplex',
         ];
         foreach ($portKeys as $k) {
             if (in_array($k, $keys, true)) {
                 return true;
             }
         }
-        if (in_array($parentKey, ['ports', 'port', 'portconnections', 'connections'], true)) {
+        if (in_array($parentKey, ['ports', 'port', 'portconnections', 'connections', 'interfaces', 'networkinterfaces', 'switchports', 'uplinks', 'links'], true)) {
             if (isset($row['id']) || isset($row['name']) || isset($row['label']) || isset($row['number'])) {
                 return true;
             }

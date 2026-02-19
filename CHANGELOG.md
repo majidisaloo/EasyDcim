@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.86] - 2026-02-19
+### Fixed
+- `Test All` in Servers tab now runs fully via AJAX without forced page-refresh fallback loops during normal operation.
+- Stop/Reset/Refresh actions in Servers tab are now handled asynchronously and keep the queue controls visible/usable.
+- Added extra order-based port lookup fallback via admin endpoints (`/api/v3/admin/orders/{id}/ports` and `/api/v3/admin/orders/{id}/service/ports`) when order details payload has no direct port rows.
+- Expanded port-row detection heuristics for nested payloads (`interfaces`, `networkinterfaces`, `switchports`, `links`, and additional connection keys).
+
 ## [1.85] - 2026-02-19
 ### Fixed
 - Reduced repeated `admin/orders/{id}` calls inside service test flow by adding runtime cache for order-details, order-service mapping, and order-ports extraction.

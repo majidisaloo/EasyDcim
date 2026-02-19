@@ -110,6 +110,27 @@ final class EasyDcimClient
         return $this->request('GET', '/api/v3/admin/orders', null, null, false, 5, $query);
     }
 
+    public function orderPorts(string $orderId, bool $withTraffic = false): array
+    {
+        $query = $withTraffic ? '?with_traffic=true' : '';
+        $candidates = [
+            '/api/v3/admin/orders/' . rawurlencode($orderId) . '/ports' . $query,
+            '/api/v3/admin/orders/' . rawurlencode($orderId) . '/service/ports' . $query,
+        ];
+
+        $last = ['http_code' => 404, 'data' => [], 'raw' => null, 'error' => 'No order ports endpoint matched'];
+        foreach ($candidates as $path) {
+            $response = $this->request('GET', $path, null, null, false, 5);
+            $code = (int) ($response['http_code'] ?? 0);
+            if ($code >= 200 && $code < 300) {
+                return $response;
+            }
+            $last = $response;
+        }
+
+        return $last;
+    }
+
     public function pingInfo(): array
     {
         if ($this->baseUrl === '' || $this->token === '') {

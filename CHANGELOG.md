@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.67] - 2026-02-19
+### Fixed
+- Batch background runner in Servers tab now calls the batch API via lightweight `GET` polling to avoid non-JSON POST responses that triggered generic `All services test failed`.
+- Improved stability of auto-run path after starting `Test All` with one-page reload.
+
 ## [1.66] - 2026-02-19
 ### Fixed
 - `Unassigned Services` mapping now uses only explicit WHMCS mappings (custom field/service-state), not inferred runtime matches; this prevents false “everything mapped” cases.

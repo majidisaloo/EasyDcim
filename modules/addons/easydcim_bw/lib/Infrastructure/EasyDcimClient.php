@@ -13,6 +13,7 @@ final class EasyDcimClient
     private bool $impersonation;
     private Logger $logger;
     private array $proxy;
+    private bool $allowSelfSigned;
 
     public function __construct(string $baseUrl, string $token, bool $impersonation, Logger $logger, array $proxy = [])
     {
@@ -21,6 +22,7 @@ final class EasyDcimClient
         $this->impersonation = $impersonation;
         $this->logger = $logger;
         $this->proxy = $proxy;
+        $this->allowSelfSigned = (bool) ($proxy['allow_self_signed'] ?? false);
     }
 
     public function bandwidth(string $serviceId, string $start, string $end, ?string $impersonateUser = null): array
@@ -87,8 +89,8 @@ final class EasyDcimClient
             return false;
         }
 
-        $result = $this->request('GET', '/api/v3/client/services', null, null, false);
-        return ($result['http_code'] ?? 0) >= 200 && ($result['http_code'] ?? 0) < 500;
+        $result = $this->pingInfo();
+        return ($result['http_code'] ?? 0) >= 200 && ($result['http_code'] ?? 0) < 300;
     }
 
     public function listServices(?string $impersonateUser = null): array
@@ -96,7 +98,21 @@ final class EasyDcimClient
         return $this->request('GET', '/api/v3/client/services', null, $impersonateUser, false);
     }
 
-    private function request(string $method, string $path, ?array $body = null, ?string $impersonateUser = null, bool $throwOnError = true): array
+    public function pingInfo(): array
+    {
+        if ($this->baseUrl === '' || $this->token === '') {
+            return ['ok' => false, 'http_code' => 0, 'error' => 'missing_base_or_token'];
+        }
+        $result = $this->request('GET', '/api/v3/client/services', null, null, false, 10);
+        $code = (int) ($result['http_code'] ?? 0);
+        return [
+            'ok' => $code >= 200 && $code < 300,
+            'http_code' => $code,
+            'error' => (string) ($result['error'] ?? ''),
+        ];
+    }
+
+    private function request(string $method, string $path, ?array $body = null, ?string $impersonateUser = null, bool $throwOnError = true, int $timeout = 30): array
     {
         $url = $this->baseUrl . $path;
         $ch = curl_init($url);
@@ -112,9 +128,13 @@ final class EasyDcimClient
 
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_TIMEOUT, max(1, $timeout));
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         $this->applyProxyOptions($ch);
+        if (str_starts_with(strtolower($url), 'https://') && $this->allowSelfSigned) {
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        }
 
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_SLASHES));

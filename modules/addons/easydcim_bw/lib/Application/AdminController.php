@@ -120,6 +120,7 @@ final class AdminController
             $tab = 'scope';
         }
 
+        $this->autoRefreshReleaseStatus();
         $this->settings = new Settings(Settings::loadFromDatabase());
         $version = Version::current($this->moduleDir);
 
@@ -132,6 +133,9 @@ final class AdminController
 
         foreach ($flash as $msg) {
             echo '<div class="alert alert-' . htmlspecialchars($msg['type']) . '">' . htmlspecialchars($msg['text']) . '</div>';
+        }
+        if (Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_update_available')->value('meta_value') === '1') {
+            echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('update_banner')) . '</div>';
         }
 
         $moduleLink = (string) ($vars['modulelink'] ?? '');
@@ -190,6 +194,7 @@ final class AdminController
         foreach ($checks as $row) {
             $checkMap[$row['name']] = $row['ok'];
         }
+        $connectionState = $this->getConnectionRuntimeState();
 
         echo '<div class="edbw-metrics">';
         $this->renderMetricCard($this->t('m_version'), (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
@@ -199,7 +204,7 @@ final class AdminController
         $this->renderMetricCard($this->t('m_cron_poll'), $lastPollAt !== '' ? $lastPollAt : $this->t('m_no_data'), $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
         $this->renderMetricCard($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
         $this->renderMetricCard($this->t('m_update_lock'), $updateLock ? $this->t('m_locked') : $this->t('m_free'), $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
-        $this->renderMetricCard($this->t('m_connection'), (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? $this->t('m_configured') : $this->t('m_not_configured'), (($checkMap['EasyDCIM Base URL'] ?? false) && ($checkMap['EasyDCIM API Token'] ?? false)) ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
+        $this->renderMetricCard($this->t('m_connection'), $connectionState['text'], $connectionState['state'], '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
 
         foreach ($this->buildRuntimeStatus() as $card) {
             $this->renderMetricCard($card['label'], $card['value'], $card['state'], $card['icon']);
@@ -248,11 +253,10 @@ final class AdminController
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_package')) . '</label><input type="number" min="0" name="autobuy_default_package_id" value="' . (int) $s->getInt('autobuy_default_package_id', 0) . '"></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_max')) . '</label><input type="number" min="1" name="autobuy_max_per_cycle" value="' . (int) $s->getInt('autobuy_max_per_cycle', 5) . '"></div>';
 
-        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('update_source')) . '</label><span class="edbw-help">Hardcoded to GitHub release: majidisaloo/EasyDcim</span></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('update_mode')) . '</label><select name="update_mode">';
-        foreach (['notify', 'check_oneclick', 'auto'] as $mode) {
-            echo '<option value="' . $mode . '"' . ($s->getString('update_mode', 'check_oneclick') === $mode ? ' selected' : '') . '>' . $mode . '</option>';
-        }
+        echo '<option value="notify"' . ($s->getString('update_mode', 'check_oneclick') === 'notify' ? ' selected' : '') . '>' . htmlspecialchars($this->t('update_mode_notify')) . '</option>';
+        echo '<option value="check_oneclick"' . ($s->getString('update_mode', 'check_oneclick') === 'check_oneclick' ? ' selected' : '') . '>' . htmlspecialchars($this->t('update_mode_check_oneclick')) . '</option>';
+        echo '<option value="auto"' . ($s->getString('update_mode', 'check_oneclick') === 'auto' ? ' selected' : '') . '>' . htmlspecialchars($this->t('update_mode_auto')) . '</option>';
         echo '</select></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('direction_mapping')) . '</label><select name="traffic_direction_map"><option value="normal"' . ($s->getString('traffic_direction_map', 'normal') === 'normal' ? ' selected' : '') . '>' . htmlspecialchars($this->t('normal')) . '</option><option value="swap"' . ($s->getString('traffic_direction_map', 'normal') === 'swap' ? ' selected' : '') . '>' . htmlspecialchars($this->t('swap_in_out')) . '</option></select><span class="edbw-help">' . htmlspecialchars($this->t('direction_mapping_help')) . '</span></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('default_calc_mode')) . '</label><select name="default_calculation_mode"><option value="TOTAL"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'TOTAL' ? ' selected' : '') . '>TOTAL (IN+OUT)</option><option value="IN"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'IN' ? ' selected' : '') . '>IN</option><option value="OUT"' . ($s->getString('default_calculation_mode', 'TOTAL') === 'OUT' ? ' selected' : '') . '>OUT</option></select></div>';
@@ -270,18 +274,20 @@ final class AdminController
     private function renderConnectionTab(): void
     {
         $s = $this->settings;
+        $tokenMasked = $s->getString('easydcim_api_token') !== '' ? '****************' : $this->t('keep_secret');
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('easy_connection')) . '</h3>';
         echo '<form method="post" class="edbw-settings-grid">';
         echo '<input type="hidden" name="tab" value="connection">';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('base_url')) . '</label><input type="text" name="easydcim_base_url" value="' . htmlspecialchars($s->getString('easydcim_base_url')) . '" size="70"></div>';
-        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('api_token')) . '</label><input type="password" name="easydcim_api_token" value="" placeholder="' . htmlspecialchars($this->t('keep_secret')) . '" size="70"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('api_token')) . '</label><input type="password" name="easydcim_api_token" value="" placeholder="' . htmlspecialchars($tokenMasked) . '" size="70"></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('access_mode')) . '</label><select name="use_impersonation"><option value="0"' . ($s->getBool('use_impersonation', false) ? '' : ' selected') . '>' . htmlspecialchars($this->t('restricted_mode')) . '</option><option value="1"' . ($s->getBool('use_impersonation', false) ? ' selected' : '') . '>' . htmlspecialchars($this->t('unrestricted_mode')) . '</option></select></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('allow_self_signed')) . '</label><input type="checkbox" name="allow_self_signed" value="1" ' . ($s->getBool('allow_self_signed', true) ? 'checked' : '') . '><span class="edbw-help">' . htmlspecialchars($this->t('allow_self_signed_help')) . '</span></div>';
         echo '<h4>' . htmlspecialchars($this->t('proxy_title')) . '</h4>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_enable')) . '</label><input id="edbw-proxy-enabled" type="checkbox" name="proxy_enabled" value="1" ' . ($s->getBool('proxy_enabled', false) ? 'checked' : '') . '></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_type')) . '</label><select class="edbw-proxy-field" name="proxy_type"><option value="http"' . ($s->getString('proxy_type', 'http') === 'http' ? ' selected' : '') . '>HTTP</option><option value="https"' . ($s->getString('proxy_type', 'http') === 'https' ? ' selected' : '') . '>HTTPS</option><option value="socks5"' . ($s->getString('proxy_type', 'http') === 'socks5' ? ' selected' : '') . '>SOCKS5</option><option value="socks4"' . ($s->getString('proxy_type', 'http') === 'socks4' ? ' selected' : '') . '>SOCKS4</option></select></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_host')) . '</label><input class="edbw-proxy-field" type="text" name="proxy_host" value="' . htmlspecialchars($s->getString('proxy_host')) . '"></div>';
-        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_port')) . '</label><input id="edbw-proxy-port" class="edbw-proxy-field" type="number" min="1" name="proxy_port" value="' . (int) $s->getInt('proxy_port', 0) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_port')) . '</label><input id="edbw-proxy-port" class="edbw-proxy-field" type="number" name="proxy_port" value="' . (int) $s->getInt('proxy_port', 0) . '"></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_user')) . '</label><input class="edbw-proxy-field" type="text" name="proxy_username" value="' . htmlspecialchars($s->getString('proxy_username')) . '"></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('proxy_pass')) . '</label><input class="edbw-proxy-field" type="password" name="proxy_password" value="" placeholder="' . htmlspecialchars($this->t('keep_secret')) . '"></div>';
         echo '<div class="edbw-actions">';
@@ -649,9 +655,10 @@ final class AdminController
         $allowedConnection = [
             'easydcim_base_url', 'use_impersonation',
             'proxy_enabled', 'proxy_type', 'proxy_host', 'proxy_port', 'proxy_username',
+            'allow_self_signed',
         ];
         $allowed = $action === 'save_connection' ? $allowedConnection : $allowedGeneral;
-        $boolKeys = ['autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode', 'proxy_enabled'];
+        $boolKeys = ['autobuy_enabled', 'preflight_strict_mode', 'purge_on_deactivate', 'test_mode', 'proxy_enabled', 'allow_self_signed'];
         $selectBoolKeys = ['use_impersonation'];
 
         foreach ($allowed as $key) {
@@ -710,17 +717,23 @@ final class AdminController
                 'port' => (int) ($_POST['proxy_port'] ?? $this->settings->getInt('proxy_port', 0)),
                 'username' => trim((string) ($_POST['proxy_username'] ?? $this->settings->getString('proxy_username'))),
                 'password' => trim((string) ($_POST['proxy_password'] ?? '')) !== '' ? trim((string) $_POST['proxy_password']) : Crypto::safeDecrypt($this->settings->getString('proxy_password')),
+                'allow_self_signed' => isset($_POST['allow_self_signed']) ? true : $this->settings->getBool('allow_self_signed', true),
             ];
             if ($baseUrl === '' || $token === '') {
                 return ['type' => 'warning', 'text' => $this->t('base_or_token_missing')];
             }
 
             $client = new EasyDcimClient($baseUrl, $token, $useImpersonation, $this->logger, $proxy);
-            if ($client->ping()) {
+            $probe = $client->pingInfo();
+            if (!empty($probe['ok'])) {
                 return ['type' => 'success', 'text' => $this->t('connection_ok')];
             }
-
-            return ['type' => 'warning', 'text' => $this->t('connection_unhealthy')];
+            $extra = trim((string) ($probe['error'] ?? ''));
+            $code = (int) ($probe['http_code'] ?? 0);
+            if ($extra === '' && $code > 0) {
+                $extra = 'HTTP ' . $code;
+            }
+            return ['type' => 'warning', 'text' => $this->t('connection_unhealthy') . ($extra !== '' ? (' (' . $extra . ')') : '')];
         } catch (\Throwable $e) {
             return ['type' => 'danger', 'text' => $this->t('connection_failed') . ': ' . $e->getMessage()];
         }
@@ -855,11 +868,57 @@ final class AdminController
         }
     }
 
+    private function autoRefreshReleaseStatus(): void
+    {
+        try {
+            $release = $this->fetchLatestRelease(self::RELEASE_REPO, 10);
+            $latestTag = (string) ($release['tag_name'] ?? '');
+            if ($latestTag === '') {
+                return;
+            }
+            $latestVersion = ltrim($latestTag, 'vV');
+            $currentVersion = Version::current($this->moduleDir)['module_version'];
+            $available = $this->compareVersion($latestVersion, $currentVersion) > 0;
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_latest_tag'],
+                ['meta_value' => $latestTag, 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_latest_zip'],
+                ['meta_value' => (string) $this->extractZipUrl($release), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_update_available'],
+                ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+        } catch (\Throwable $e) {
+        }
+    }
+
+    private function getConnectionRuntimeState(): array
+    {
+        $baseUrl = $this->settings->getString('easydcim_base_url');
+        $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
+        if ($baseUrl === '' || $token === '') {
+            return ['text' => $this->t('m_not_configured'), 'state' => 'error'];
+        }
+        try {
+            $client = new EasyDcimClient($baseUrl, $token, $this->settings->getBool('use_impersonation', false), $this->logger, $this->proxyConfig());
+            $ping = $client->pingInfo();
+            if (!empty($ping['ok'])) {
+                return ['text' => $this->t('m_connected'), 'state' => 'ok'];
+            }
+            return ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
+        } catch (\Throwable $e) {
+            return ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
+        }
+    }
+
     private function checkReleaseUpdate(): array
     {
         try {
             $repo = self::RELEASE_REPO;
-            $release = $this->fetchLatestRelease($repo);
+            $release = $this->fetchLatestRelease($repo, 15);
             $latestTag = (string) ($release['tag_name'] ?? '');
             $latestVersion = ltrim($latestTag, 'vV');
             $currentVersion = Version::current($this->moduleDir)['module_version'];
@@ -917,14 +976,14 @@ final class AdminController
         }
     }
 
-    private function fetchLatestRelease(string $repo): array
+    private function fetchLatestRelease(string $repo, int $timeout = 30): array
     {
         $repo = trim($repo);
         if (!preg_match('/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/', $repo)) {
             throw new \RuntimeException('GitHub repo format must be owner/repo.');
         }
         $url = 'https://api.github.com/repos/' . $repo . '/releases/latest';
-        $response = $this->httpGetJson($url);
+        $response = $this->httpGetJson($url, $timeout);
         if (!isset($response['tag_name'])) {
             throw new \RuntimeException('GitHub latest release payload is invalid.');
         }
@@ -942,7 +1001,7 @@ final class AdminController
         return '';
     }
 
-    private function httpGetJson(string $url): array
+    private function httpGetJson(string $url, int $timeout = 30): array
     {
         if (!function_exists('curl_init')) {
             throw new \RuntimeException('cURL extension is required.');
@@ -950,7 +1009,7 @@ final class AdminController
 
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_TIMEOUT, max(1, $timeout));
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['User-Agent: EasyDcim-BW', 'Accept: application/vnd.github+json']);
         $raw = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
@@ -1403,6 +1462,7 @@ final class AdminController
             'port' => $this->settings->getInt('proxy_port', 0),
             'username' => $this->settings->getString('proxy_username'),
             'password' => Crypto::safeDecrypt($this->settings->getString('proxy_password')),
+            'allow_self_signed' => $this->settings->getBool('allow_self_signed', true),
         ];
     }
 
@@ -1431,8 +1491,10 @@ final class AdminController
             'proxy_port' => 'پورت پروکسی',
             'proxy_user' => 'نام کاربری پروکسی',
             'proxy_pass' => 'رمز پروکسی',
-            'save_connection' => 'ذخیره اتصال',
+            'save_connection' => 'ذخیره',
             'test_connection' => 'تست اتصال EasyDCIM',
+            'allow_self_signed' => 'پذیرش SSL Self-Signed',
+            'allow_self_signed_help' => 'برای اتصال با IP یا گواهی self-signed فعال بماند.',
             'module_settings' => 'تنظیمات ماژول',
             'module_status' => 'وضعیت ماژول',
             'active' => 'فعال',
@@ -1446,8 +1508,10 @@ final class AdminController
             'autobuy_threshold' => 'آستانه خرید خودکار (GB)',
             'autobuy_package' => 'Package ID پیش‌فرض خرید خودکار',
             'autobuy_max' => 'حداکثر خرید خودکار در سیکل',
-            'update_source' => 'منبع آپدیت',
             'update_mode' => 'حالت آپدیت',
+            'update_mode_notify' => 'فقط اعلان',
+            'update_mode_check_oneclick' => 'بررسی + آپدیت یک‌کلیکی',
+            'update_mode_auto' => 'آپدیت خودکار',
             'direction_mapping' => 'نگاشت جهت ترافیک',
             'normal' => 'عادی',
             'swap_in_out' => 'جابجایی IN/OUT',
@@ -1517,10 +1581,13 @@ final class AdminController
             'm_free' => 'آزاد',
             'm_configured' => 'تنظیم شده',
             'm_not_configured' => 'تنظیم نشده',
+            'm_connected' => 'متصل',
+            'm_configured_disconnected' => 'تنظیم شده ولی متصل نیست',
             'm_unknown' => 'نامشخص',
             'update_actions' => 'اقدامات آپدیت',
             'check_update_now' => 'بررسی آپدیت',
             'apply_latest_release' => 'اعمال آخرین ریلیز',
+            'update_banner' => 'آپدیت جدید برای ماژول موجود است. لطفا از داشبورد اقدام کنید.',
             'no_data' => 'بدون داده',
             'hc_php_version' => 'نسخه PHP',
             'hc_current' => 'فعلی',
@@ -1581,8 +1648,10 @@ final class AdminController
             'proxy_port' => 'Proxy Port',
             'proxy_user' => 'Proxy Username',
             'proxy_pass' => 'Proxy Password',
-            'save_connection' => 'Save Connection',
+            'save_connection' => 'Save',
             'test_connection' => 'Test EasyDCIM Connection',
+            'allow_self_signed' => 'Allow Self-Signed SSL',
+            'allow_self_signed_help' => 'Keep enabled for IP-based endpoints or self-signed certificates.',
             'module_settings' => 'Module Settings',
             'module_status' => 'Module Status',
             'active' => 'Active',
@@ -1596,8 +1665,10 @@ final class AdminController
             'autobuy_threshold' => 'Auto-Buy Threshold GB',
             'autobuy_package' => 'Auto-Buy Default Package ID',
             'autobuy_max' => 'Auto-Buy Max/Cycle',
-            'update_source' => 'Update Source',
             'update_mode' => 'Update Mode',
+            'update_mode_notify' => 'Notify only',
+            'update_mode_check_oneclick' => 'Check + One-click update',
+            'update_mode_auto' => 'Auto update',
             'direction_mapping' => 'Direction Mapping',
             'normal' => 'Normal',
             'swap_in_out' => 'Swap IN/OUT',
@@ -1667,10 +1738,13 @@ final class AdminController
             'm_free' => 'Free',
             'm_configured' => 'Configured',
             'm_not_configured' => 'Not configured',
+            'm_connected' => 'Connected',
+            'm_configured_disconnected' => 'Configured but disconnected',
             'm_unknown' => 'Unknown',
             'update_actions' => 'Update Actions',
             'check_update_now' => 'Check Update Now',
             'apply_latest_release' => 'Apply Latest Release',
+            'update_banner' => 'A new module update is available. Please apply it from the dashboard.',
             'no_data' => 'No data',
             'hc_php_version' => 'PHP version',
             'hc_current' => 'Current',

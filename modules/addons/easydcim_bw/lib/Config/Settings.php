@@ -86,6 +86,7 @@ final class Settings
             'proxy_port' => '',
             'proxy_username' => '',
             'proxy_password' => '',
+            'allow_self_signed' => '1',
         ];
     }
 

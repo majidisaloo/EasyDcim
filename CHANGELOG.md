@@ -2,6 +2,20 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.24] - 2026-02-19
+### Added
+- `Allow Self-Signed SSL` option in EasyDCIM connection tab (enabled by default) for IP-based/self-signed deployments.
+- Global update-available banner across module tabs when a newer release exists.
+### Changed
+- Dashboard EasyDCIM connection card now shows runtime connectivity state: `Connected` or `Configured but disconnected` (warning).
+- Update availability is refreshed on each module page load with a 10-second timeout fail-safe.
+- Connection save button label simplified to `Save`/`ذخیره`.
+- Update mode dropdown labels are now localized for Persian/English.
+- Connection token field now shows masked placeholder when a token already exists.
+- Removed visible hardcoded update-source hint text from settings UI.
+### Fixed
+- EasyDCIM client now supports self-signed SSL in admin/client/cron calls via cURL SSL verify controls.
+
 ## [1.23] - 2026-02-19
 ### Fixed
 - In scope plan editor, checking `Unlimited` now immediately clears the paired quota input value and disables it.

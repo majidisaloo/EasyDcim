@@ -566,6 +566,7 @@ final class CronRunner
             'port' => $this->settings->getInt('proxy_port', 0),
             'username' => $this->settings->getString('proxy_username'),
             'password' => Crypto::safeDecrypt($this->settings->getString('proxy_password')),
+            'allow_self_signed' => $this->settings->getBool('allow_self_signed', true),
         ];
     }
 }

@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.22] - 2026-02-19
+### Fixed
+- Scope plan saving flow hardened: auto-save now posts through standard `save_product_plan` action with AJAX flag, avoiding route/token mismatch issues in some WHMCS environments.
+- Save feedback is now resilient when server returns non-JSON output.
+### Changed
+- Scope labels are localized (`IN/OUT/TOTAL` now shown as `دانلود/آپلود/مجموع` in Persian UI).
+- Preflight table/details were further localized for Persian mode (`Available/Configured/Missing/Not configured` coverage).
+
 ## [1.21] - 2026-02-19
 ### Added
 - New `Servers` tab with two sections: WHMCS-mapped services and unassigned EasyDCIM services.

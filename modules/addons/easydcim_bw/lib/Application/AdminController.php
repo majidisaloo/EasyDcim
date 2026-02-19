@@ -56,6 +56,13 @@ final class AdminController
             $this->json($this->saveProductPlan());
             return;
         }
+        if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+            && (string) ($_POST['action'] ?? '') === 'save_product_plan'
+            && isset($_POST['ajax'])
+        ) {
+            $this->json($this->saveProductPlan());
+            return;
+        }
 
         if ($action === 'apply_update') {
             $flash[] = ['type' => 'warning', 'text' => 'Git shell update is disabled. Use Release update actions.'];
@@ -81,7 +88,7 @@ final class AdminController
             $tab = 'connection';
         }
         if ($action === 'run_preflight') {
-            $flash[] = ['type' => 'info', 'text' => 'Preflight retest completed.'];
+            $flash[] = ['type' => 'info', 'text' => $this->t('preflight_retested')];
             $tab = 'dashboard';
         }
         if ($action === 'check_release_update') {
@@ -362,7 +369,7 @@ final class AdminController
         echo '<h3>' . htmlspecialchars($this->t('plan_quotas')) . '</h3>';
         echo '<p class="edbw-help">' . htmlspecialchars($this->t('plan_quotas_help')) . '</p>';
         echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>' . htmlspecialchars($this->t('product')) . '</th><th>GID</th><th>' . htmlspecialchars($this->t('cf_check')) . '</th><th>IN GB</th><th>OUT GB</th><th>TOTAL GB</th><th>' . htmlspecialchars($this->t('unlimited_label')) . '</th><th>' . htmlspecialchars($this->t('action')) . '</th></tr></thead><tbody>';
+        echo '<table class="table table-striped"><thead><tr><th>PID</th><th>' . htmlspecialchars($this->t('product')) . '</th><th>GID</th><th>' . htmlspecialchars($this->t('cf_check')) . '</th><th>' . htmlspecialchars($this->t('in_label')) . ' GB</th><th>' . htmlspecialchars($this->t('out_label')) . ' GB</th><th>' . htmlspecialchars($this->t('total_label')) . ' GB</th><th>' . htmlspecialchars($this->t('unlimited_label')) . '</th><th>' . htmlspecialchars($this->t('action')) . '</th></tr></thead><tbody>';
         foreach ($scopedProducts as $row) {
             echo '<tr class="edbw-auto-plan" data-pid="' . (int) $row['pid'] . '">';
             echo '<td>' . (int) $row['pid'] . '</td>';
@@ -374,9 +381,9 @@ final class AdminController
             echo '<td><input type="number" step="0.01" min="0" name="pd_quota_out_gb" value="' . htmlspecialchars((string) $row['quota_out']) . '"' . ($row['unlimited_out'] ? ' disabled class="edbw-disabled-input"' : '') . '></td>';
             echo '<td><input type="number" step="0.01" min="0" name="pd_quota_total_gb" value="' . htmlspecialchars((string) $row['quota_total']) . '"' . ($row['unlimited_total'] ? ' disabled class="edbw-disabled-input"' : '') . '></td>';
             echo '<td>';
-            echo '<label>IN <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_in_gb" name="pd_unlimited_in" value="1" ' . ($row['unlimited_in'] ? 'checked' : '') . '></label> ';
-            echo '<label>OUT <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_out_gb" name="pd_unlimited_out" value="1" ' . ($row['unlimited_out'] ? 'checked' : '') . '></label> ';
-            echo '<label>TOTAL <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_total_gb" name="pd_unlimited_total" value="1" ' . ($row['unlimited_total'] ? 'checked' : '') . '></label>';
+            echo '<label>' . htmlspecialchars($this->t('in_label')) . ' <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_in_gb" name="pd_unlimited_in" value="1" ' . ($row['unlimited_in'] ? 'checked' : '') . '></label> ';
+            echo '<label>' . htmlspecialchars($this->t('out_label')) . ' <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_out_gb" name="pd_unlimited_out" value="1" ' . ($row['unlimited_out'] ? 'checked' : '') . '></label> ';
+            echo '<label>' . htmlspecialchars($this->t('total_label')) . ' <input type="checkbox" class="edbw-limit-toggle" data-target="pd_quota_total_gb" name="pd_unlimited_total" value="1" ' . ($row['unlimited_total'] ? 'checked' : '') . '></label>';
             echo '</td>';
             echo '<td><select name="pd_action"><option value="disable_ports"' . ($row['action'] === 'disable_ports' ? ' selected' : '') . '>' . htmlspecialchars($this->t('disable_ports')) . '</option><option value="suspend"' . ($row['action'] === 'suspend' ? ' selected' : '') . '>' . htmlspecialchars($this->t('suspend')) . '</option><option value="both"' . ($row['action'] === 'both' ? ' selected' : '') . '>' . htmlspecialchars($this->t('both')) . '</option></select></td>';
             echo '</tr>';
@@ -387,12 +394,12 @@ final class AdminController
         echo '<script>(function(){'
             . 'var rows=document.querySelectorAll(".edbw-auto-plan");'
             . 'var note=document.getElementById("edbw-save-note");'
-            . 'var q=window.location.search||"";var sep=q.indexOf("?")===-1?"?":"&";var apiUrl=window.location.pathname+q+sep+"api=save_plan";'
+            . 'var apiUrl=window.location.pathname+(window.location.search||"");'
             . 'function applyToggles(r){r.querySelectorAll(".edbw-limit-toggle").forEach(function(c){var target=r.querySelector("[name=\\"" + c.getAttribute("data-target") + "\\"]");if(target){target.disabled=c.checked;if(c.checked){target.classList.add("edbw-disabled-input");}else{target.classList.remove("edbw-disabled-input");}}});}'
             . 'function rowData(r){var fd=new FormData();fd.append("tab","scope");fd.append("action","save_product_plan");fd.append("pd_pid",r.getAttribute("data-pid")||"0");r.querySelectorAll("input,select").forEach(function(el){if(!el.name){return;}if(el.type==="checkbox"){if(el.checked){fd.append(el.name,"1");}return;}fd.append(el.name,el.value||"");});return fd;}'
             . 'function postRow(r){var fd=rowData(r);fd.append("ajax","1");'
-            . 'fetch(apiUrl,{method:"POST",body:fd,credentials:"same-origin"})'
-            . '.then(function(r){return r.json();}).then(function(j){note.textContent=(j.text||"' . addslashes($this->t('saved')) . '");note.style.color=(j.type==="success"?"#047857":"#b91c1c");})'
+            . 'fetch(apiUrl,{method:"POST",body:fd,credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest"}})'
+            . '.then(function(r){return r.text();}).then(function(txt){var j=null;try{j=JSON.parse(txt);}catch(_){j=null;}if(j){note.textContent=(j.text||"' . addslashes($this->t('saved')) . '");note.style.color=(j.type==="success"?"#047857":"#b91c1c");return;}note.textContent="' . addslashes($this->t('saved')) . '";note.style.color="#047857";})'
             . '.catch(function(){note.textContent="' . addslashes($this->t('save_failed')) . '";note.style.color="#b91c1c";});}'
             . 'rows.forEach(function(r){applyToggles(r);var t;var onEdit=function(){applyToggles(r);clearTimeout(t);t=setTimeout(function(){postRow(r);},350);};r.querySelectorAll("input,select").forEach(function(el){el.addEventListener("change",onEdit);if(el.tagName==="INPUT" && el.type!=="checkbox"){el.addEventListener("input",onEdit);}});});'
             . 'var saveAll=document.getElementById("edbw-save-all");if(saveAll){saveAll.addEventListener("click",function(){var i=0;function next(){if(i>=rows.length){note.textContent="' . addslashes($this->t('all_rows_saved')) . '";note.style.color="#047857";return;}postRow(rows[i]);i++;setTimeout(next,120);}next();});}'
@@ -568,20 +575,20 @@ final class AdminController
     {
         $checks = [];
         $phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
-        $checks[] = ['name' => 'PHP version', 'ok' => $phpOk, 'detail' => 'Current: ' . PHP_VERSION . ', required: >= 8.0'];
+        $checks[] = ['name' => $this->t('hc_php_version'), 'ok' => $phpOk, 'detail' => $this->t('hc_current') . ': ' . PHP_VERSION . ', ' . $this->t('hc_required') . ': >= 8.0'];
 
-        $checks[] = ['name' => 'cURL extension', 'ok' => function_exists('curl_init'), 'detail' => function_exists('curl_init') ? 'Available' : 'Missing'];
-        $checks[] = ['name' => 'Update engine', 'ok' => true, 'detail' => 'Release-based updater (no shell command required)'];
-        $checks[] = ['name' => 'ZIP extension', 'ok' => class_exists(\ZipArchive::class), 'detail' => class_exists(\ZipArchive::class) ? 'Available' : 'Missing'];
-        $checks[] = ['name' => 'Module status', 'ok' => $this->settings->getBool('module_enabled', true), 'detail' => $this->settings->getBool('module_enabled', true) ? 'Enabled' : 'Disabled'];
+        $checks[] = ['name' => $this->t('hc_curl_extension'), 'ok' => function_exists('curl_init'), 'detail' => function_exists('curl_init') ? $this->t('hc_available') : $this->t('hc_missing')];
+        $checks[] = ['name' => $this->t('hc_update_engine'), 'ok' => true, 'detail' => $this->t('hc_release_engine')];
+        $checks[] = ['name' => $this->t('hc_zip_extension'), 'ok' => class_exists(\ZipArchive::class), 'detail' => class_exists(\ZipArchive::class) ? $this->t('hc_available') : $this->t('hc_missing')];
+        $checks[] = ['name' => $this->t('hc_module_status'), 'ok' => $this->settings->getBool('module_enabled', true), 'detail' => $this->settings->getBool('module_enabled', true) ? $this->t('active') : $this->t('disabled')];
 
         $baseUrl = $this->settings->getString('easydcim_base_url');
         $token = $this->settings->getString('easydcim_api_token');
-        $checks[] = ['name' => 'EasyDCIM Base URL', 'ok' => $baseUrl !== '', 'detail' => $baseUrl !== '' ? 'Configured' : 'Not configured'];
-        $checks[] = ['name' => 'EasyDCIM API Token', 'ok' => $token !== '', 'detail' => $token !== '' ? 'Configured' : 'Not configured'];
+        $checks[] = ['name' => $this->t('hc_base_url'), 'ok' => $baseUrl !== '', 'detail' => $baseUrl !== '' ? $this->t('hc_configured') : $this->t('hc_not_configured')];
+        $checks[] = ['name' => $this->t('hc_api_token'), 'ok' => $token !== '', 'detail' => $token !== '' ? $this->t('hc_configured') : $this->t('hc_not_configured')];
 
         $scopeSet = !empty($this->settings->getCsvList('managed_pids')) || !empty($this->settings->getCsvList('managed_gids'));
-        $checks[] = ['name' => 'Managed scope (PID/GID)', 'ok' => $scopeSet, 'detail' => $scopeSet ? 'Configured' : 'No PID/GID set'];
+        $checks[] = ['name' => $this->t('hc_scope'), 'ok' => $scopeSet, 'detail' => $scopeSet ? $this->t('hc_configured') : $this->t('hc_no_scope')];
 
         $requiredCustomFields = ['easydcim_service_id', 'easydcim_order_id', 'easydcim_server_id'];
         $existing = Capsule::table('tblcustomfields')
@@ -593,7 +600,7 @@ final class AdminController
             $checks[] = [
                 'name' => 'Custom field: ' . $field,
                 'ok' => in_array($field, $existing, true),
-                'detail' => in_array($field, $existing, true) ? 'Found' : 'Missing',
+                'detail' => in_array($field, $existing, true) ? $this->t('hc_found') : $this->t('hc_missing'),
             ];
         }
 
@@ -1461,6 +1468,9 @@ final class AdminController
             'loaded_products' => 'تعداد محصول بارگذاری‌شده در محدوده',
             'plan_quotas' => 'سقف پلن‌ها (IN / OUT / TOTAL)',
             'plan_quotas_help' => 'هر ردیف با تغییرات شما خودکار ذخیره می‌شود. دکمه پایین برای ذخیره همه ردیف‌هاست.',
+            'in_label' => 'دانلود',
+            'out_label' => 'آپلود',
+            'total_label' => 'مجموع',
             'product' => 'محصول',
             'cf_check' => 'بررسی CF',
             'unlimited_label' => 'نامحدود (IN/OUT/TOTAL)',
@@ -1511,7 +1521,25 @@ final class AdminController
             'check_update_now' => 'بررسی آپدیت',
             'apply_latest_release' => 'اعمال آخرین ریلیز',
             'no_data' => 'بدون داده',
+            'hc_php_version' => 'نسخه PHP',
+            'hc_current' => 'فعلی',
+            'hc_required' => 'لازم',
+            'hc_curl_extension' => 'افزونه cURL',
+            'hc_update_engine' => 'موتور آپدیت',
+            'hc_release_engine' => 'آپدیتر مبتنی بر ریلیز (بدون نیاز به دستور shell)',
+            'hc_zip_extension' => 'افزونه ZIP',
+            'hc_module_status' => 'وضعیت ماژول',
+            'hc_base_url' => 'EasyDCIM Base URL',
+            'hc_api_token' => 'EasyDCIM API Token',
+            'hc_scope' => 'محدوده مدیریت (PID/GID)',
+            'hc_configured' => 'تنظیم شده',
+            'hc_not_configured' => 'تنظیم نشده',
+            'hc_no_scope' => 'هیچ PID/GID تنظیم نشده',
+            'hc_found' => 'موجود',
+            'hc_available' => 'موجود',
+            'hc_missing' => 'ناموجود',
             'preflight_checks' => 'بررسی‌های پیش از اجرا',
+            'preflight_retested' => 'بررسی پیش از اجرا دوباره انجام شد.',
             'retest' => 'تست مجدد',
             'check' => 'چک',
             'details' => 'جزئیات',
@@ -1590,6 +1618,9 @@ final class AdminController
             'loaded_products' => 'Loaded products by current scope',
             'plan_quotas' => 'Plan Quotas (IN / OUT / TOTAL)',
             'plan_quotas_help' => 'Rows auto-save on change. Use the bottom button to save all rows in one click.',
+            'in_label' => 'Download',
+            'out_label' => 'Upload',
+            'total_label' => 'Total',
             'product' => 'Product',
             'cf_check' => 'CF Check',
             'unlimited_label' => 'Unlimited IN/OUT/TOTAL',
@@ -1640,7 +1671,25 @@ final class AdminController
             'check_update_now' => 'Check Update Now',
             'apply_latest_release' => 'Apply Latest Release',
             'no_data' => 'No data',
+            'hc_php_version' => 'PHP version',
+            'hc_current' => 'Current',
+            'hc_required' => 'required',
+            'hc_curl_extension' => 'cURL extension',
+            'hc_update_engine' => 'Update engine',
+            'hc_release_engine' => 'Release-based updater (no shell command required)',
+            'hc_zip_extension' => 'ZIP extension',
+            'hc_module_status' => 'Module status',
+            'hc_base_url' => 'EasyDCIM Base URL',
+            'hc_api_token' => 'EasyDCIM API Token',
+            'hc_scope' => 'Managed scope (PID/GID)',
+            'hc_configured' => 'Configured',
+            'hc_not_configured' => 'Not configured',
+            'hc_no_scope' => 'No PID/GID set',
+            'hc_found' => 'Found',
+            'hc_available' => 'Available',
+            'hc_missing' => 'Missing',
             'preflight_checks' => 'Preflight Checks',
+            'preflight_retested' => 'Preflight retest completed.',
             'retest' => 'Retest',
             'check' => 'Check',
             'details' => 'Details',

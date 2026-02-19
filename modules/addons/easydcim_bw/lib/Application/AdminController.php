@@ -744,16 +744,18 @@ final class AdminController
         echo '<div class="edbw-panel">';
         echo '<h3>System Logs</h3>';
         echo '<p class="edbw-help">Retention is set to ' . $retention . ' day(s). Logs older than this are auto-cleaned in cron.</p>';
-        echo '<form method="post" class="edbw-form-inline">';
+        echo '<div class="edbw-server-actions">';
+        echo '<form method="post" class="edbw-form-inline edbw-action-card">';
         echo '<input type="hidden" name="tab" value="logs">';
         echo '<input type="hidden" name="action" value="cleanup_logs">';
         echo '<button class="btn btn-default" type="submit">Cleanup Logs Now</button>';
         echo '</form>';
-        echo '<form method="post" class="edbw-form-inline">';
+        echo '<form method="post" class="edbw-form-inline edbw-action-card">';
         echo '<input type="hidden" name="tab" value="logs">';
         echo '<input type="hidden" name="action" value="cleanup_logs_all">';
         echo '<button class="btn btn-default" type="submit">Delete All Logs</button>';
         echo '</form>';
+        echo '</div>';
 
         $logs = $this->getSystemLogs(500);
         echo '<div class="edbw-table-wrap">';

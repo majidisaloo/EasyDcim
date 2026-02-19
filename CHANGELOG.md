@@ -2,6 +2,10 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.55] - 2026-02-19
+### Changed
+- Logs tab action buttons (`Cleanup Logs Now`, `Delete All Logs`) are now grouped in one horizontal card-style row for cleaner UI.
+
 ## [1.54] - 2026-02-19
 ### Changed
 - `Server ID` is now prioritized in service test flow:

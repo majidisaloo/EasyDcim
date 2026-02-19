@@ -616,21 +616,21 @@ final class AdminController
                 . 'var formRefresh=document.getElementById("edbw-refresh-cache-form");'
                 . 'var progress=document.getElementById("edbw-test-all-progress");'
                 . 'var status=document.getElementById("edbw-test-all-status");'
-                . 'var q=new URLSearchParams(window.location.search);q.set("module","easydcim_bw");q.set("tab","servers");'
-                . 'var apiUrlBase=window.location.pathname+"?"+q.toString();'
-                . 'var q2=new URLSearchParams(window.location.search);q2.set("module","easydcim_bw");q2.set("tab","servers");q2.set("api","servers_batch");'
-                . 'var apiUrlFallback=window.location.pathname+"?"+q2.toString();'
+                . 'var uBase=new URL(window.location.href);uBase.searchParams.set("module","easydcim_bw");uBase.searchParams.set("tab","servers");uBase.searchParams.delete("action");uBase.searchParams.delete("api");'
+                . 'var apiUrlBase=uBase.pathname+"?"+uBase.searchParams.toString();'
+                . 'var uFallback=new URL(window.location.href);uFallback.searchParams.set("module","easydcim_bw");uFallback.searchParams.set("tab","servers");uFallback.searchParams.set("api","servers_batch");uFallback.searchParams.delete("action");'
+                . 'var apiUrlFallback=uFallback.pathname+"?"+uFallback.searchParams.toString();'
                 . 'function parsePayload(txt){try{return JSON.parse(txt);}catch(e){return null;}}'
                 . 'function errPayload(txt){var raw=((txt||"")+"").replace(/\\s+/g," ").trim().slice(0,180);return {type:"danger",message:"' . addslashes($this->t('servers_test_all_failed')) . ( $this->isFa ? ' - پاسخ نامعتبر سرور' : ' - invalid server response') . '",raw:raw,state:{running:false,total:0,done:0,ok:0,warn:0,fail:0,remaining:0}};}'
                 . 'function call(op){'
                 . 'var actionMap={test:"test_all_services",stop:"stop_test_all_services",reset:"reset_test_all_services",refresh:"refresh_servers_cache"};'
                 . 'var action=(actionMap[op]||"test_all_services");'
                 . 'var url=apiUrlBase+"&action="+encodeURIComponent(action)+"&ajax=1&_="+Date.now();'
-                . 'return fetch(url,{method:"GET",credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest"}})'
+                . 'return fetch(url,{method:"GET",credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}})'
                 . '.then(function(r){return r.text();})'
                 . '.then(function(txt){var p=parsePayload(txt);if(p){return p;}'
                 . 'var fUrl=apiUrlFallback+"&op="+encodeURIComponent(op)+"&ajax=1&_="+Date.now();'
-                . 'return fetch(fUrl,{method:"GET",credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest"}})'
+                . 'return fetch(fUrl,{method:"GET",credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}})'
                 . '.then(function(r2){return r2.text();})'
                 . '.then(function(txt2){var p2=parsePayload(txt2);return p2||errPayload(txt2||txt);})'
                 . '.catch(function(){return errPayload(txt);});'
@@ -2250,11 +2250,21 @@ final class AdminController
 
     private function isAjaxRequest(): bool
     {
+        if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
+            return true;
+        }
         if (isset($_POST['ajax']) && (string) $_POST['ajax'] === '1') {
             return true;
         }
+        if (isset($_GET['ajax']) && (string) $_GET['ajax'] === '1') {
+            return true;
+        }
         $hdr = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''));
-        return $hdr === 'xmlhttprequest';
+        if ($hdr === 'xmlhttprequest') {
+            return true;
+        }
+        $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+        return str_contains($accept, 'application/json');
     }
 
     private function buildBatchAjaxPayload(array $result): array

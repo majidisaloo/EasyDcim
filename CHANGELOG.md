@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.70] - 2026-02-19
+### Fixed
+- Fixed `All services test failed - invalid server response` in Servers batch test:
+  - batch AJAX URLs now preserve full current admin query parameters (including WHMCS admin token/session params)
+  - this prevents HTML admin/login pages from being returned to JS where JSON was expected.
+
 ## [1.69] - 2026-02-19
 ### Fixed
 - Hardened Servers batch AJAX against JS/response conflicts:

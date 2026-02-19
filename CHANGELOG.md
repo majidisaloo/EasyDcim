@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.89] - 2026-02-19
+### Fixed
+- Added new server-port fallback through `/api/v3/admin/ports` with `item_id` search when direct server/order port endpoints are unavailable.
+- Improved port payload parsing for paginated/nested API responses so admin list responses can be converted to port rows correctly.
+- Strengthened fallback extraction path by recursively parsing nested structures when direct rows are empty.
+
 ## [1.88] - 2026-02-19
 ### Fixed
 - Bulk test flow no longer short-circuits permanently on `order_id_only:bulk`; it now continues with service/server fallback probes in the same run.

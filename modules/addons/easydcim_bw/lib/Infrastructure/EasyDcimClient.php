@@ -51,15 +51,29 @@ final class EasyDcimClient
             '/api/v3/admin/servers/' . rawurlencode($serverId) . '/ports' . $query,
         ];
 
+        $best = ['http_code' => 404, 'data' => [], 'raw' => null, 'error' => 'No server port endpoint matched'];
         foreach ($candidates as $path) {
             $response = $this->request('GET', $path, null, $impersonateUser, false);
             $code = (int) ($response['http_code'] ?? 0);
             if ($code >= 200 && $code < 300) {
                 return $response;
             }
+            if ($code > (int) ($best['http_code'] ?? 0)) {
+                $best = $response;
+            }
         }
 
-        return ['http_code' => 404, 'data' => [], 'raw' => null, 'error' => 'No server port endpoint matched'];
+        // Fallback: some EasyDCIM installations expose ports only through admin list endpoint.
+        $adminListResponse = $this->adminPortsByItemId($serverId);
+        $adminListCode = (int) ($adminListResponse['http_code'] ?? 0);
+        if ($adminListCode >= 200 && $adminListCode < 300) {
+            return $adminListResponse;
+        }
+        if ($adminListCode > (int) ($best['http_code'] ?? 0)) {
+            $best = $adminListResponse;
+        }
+
+        return $best;
     }
 
     public function disablePort(string $portId): array
@@ -131,6 +145,34 @@ final class EasyDcimClient
         }
 
         return $last;
+    }
+
+    public function adminPortsByItemId(string $itemId): array
+    {
+        $itemId = trim($itemId);
+        if ($itemId === '') {
+            return ['http_code' => 0, 'data' => [], 'raw' => null, 'error' => 'missing_item_id'];
+        }
+
+        $queries = [
+            ['page' => 1, 'per_page' => 100, 'search_term' => $itemId, 'search_op' => 'eq', 'search_fields' => 'item_id'],
+            ['page' => 1, 'per_page' => 100, 'search_term' => $itemId, 'search_op' => 'eq', 'search_fields' => ['item_id']],
+            ['page' => 1, 'per_page' => 100, 'search_term' => $itemId, 'search_op' => 'eq'],
+        ];
+
+        $best = ['http_code' => 404, 'data' => [], 'raw' => null, 'error' => 'No admin ports list matched'];
+        foreach ($queries as $query) {
+            $response = $this->request('GET', '/api/v3/admin/ports', null, null, false, 5, $query);
+            $code = (int) ($response['http_code'] ?? 0);
+            if ($code >= 200 && $code < 300 && $this->responseContainsRows((array) ($response['data'] ?? []))) {
+                return $response;
+            }
+            if ($code > (int) ($best['http_code'] ?? 0)) {
+                $best = $response;
+            }
+        }
+
+        return $best;
     }
 
     public function pingInfo(): array
@@ -273,5 +315,27 @@ final class EasyDcimClient
         if ($username !== '') {
             curl_setopt($ch, CURLOPT_PROXYUSERPWD, $username . ':' . $password);
         }
+    }
+
+    private function responseContainsRows(array $payload): bool
+    {
+        if (array_keys($payload) === range(0, count($payload) - 1)) {
+            return count($payload) > 0;
+        }
+        foreach (['items', 'data', 'records', 'rows', 'collection'] as $key) {
+            if (!isset($payload[$key]) || !is_array($payload[$key])) {
+                continue;
+            }
+            $value = $payload[$key];
+            if (array_keys($value) === range(0, count($value) - 1)) {
+                return count($value) > 0;
+            }
+            foreach (['items', 'data', 'records', 'rows'] as $nested) {
+                if (isset($value[$nested]) && is_array($value[$nested]) && count($value[$nested]) > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

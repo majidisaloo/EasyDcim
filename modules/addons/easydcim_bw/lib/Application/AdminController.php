@@ -3726,11 +3726,11 @@ final class AdminController
     {
         $items = [];
         if (isset($payload['data']) && is_array($payload['data'])) {
-            $items = $payload['data'];
+            $items = $this->extractListFromObject($payload['data']);
         } elseif (isset($payload['ports']) && is_array($payload['ports'])) {
-            $items = $payload['ports'];
+            $items = $this->extractListFromObject($payload['ports']);
         } elseif (isset($payload['result']) && is_array($payload['result'])) {
-            $items = $payload['result'];
+            $items = $this->extractListFromObject($payload['result']);
         } elseif (array_keys($payload) === range(0, count($payload) - 1)) {
             $items = $payload;
         } else {
@@ -3740,6 +3740,10 @@ final class AdminController
             } else {
                 $items = [];
             }
+        }
+
+        if (empty($items)) {
+            $items = $this->extractListFromObject($payload);
         }
 
         $out = [];
@@ -3784,6 +3788,10 @@ final class AdminController
                 'connected_port_id' => trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['connected_port_id'] ?? $row['conn_port'] ?? '')),
                 'connected_port_label' => $connectedPortLabel,
             ];
+        }
+
+        if (empty($out)) {
+            $out = $this->extractPortsRecursive($payload);
         }
 
         return $out;

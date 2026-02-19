@@ -85,6 +85,36 @@ final class AdminController
             }
         }
 
+        if ($ajax && in_array((string) $action, ['test_all_services', 'stop_test_all_services', 'reset_test_all_services', 'refresh_servers_cache'], true)) {
+            try {
+                if ($action === 'test_all_services') {
+                    $this->json($this->buildBatchAjaxPayload($this->testAllServices()));
+                    return;
+                }
+                if ($action === 'stop_test_all_services') {
+                    $this->json($this->buildBatchAjaxPayload($this->stopTestAllServices()));
+                    return;
+                }
+                if ($action === 'reset_test_all_services') {
+                    $this->json($this->buildBatchAjaxPayload($this->resetTestAllServices()));
+                    return;
+                }
+                if ($action === 'refresh_servers_cache') {
+                    $this->json($this->buildBatchAjaxPayload($this->refreshServersCacheNow()));
+                    return;
+                }
+            } catch (\Throwable $e) {
+                $this->logger->log('ERROR', 'servers_batch_ajax_action_failed', ['action' => $action, 'error' => $e->getMessage()]);
+                $this->json([
+                    'type' => 'danger',
+                    'message' => $this->t('servers_test_all_failed') . ': ' . $e->getMessage(),
+                    'silent' => false,
+                    'state' => $this->buildBatchStatePayload(),
+                ]);
+                return;
+            }
+        }
+
         if ($api === 'purchase_logs') {
             $this->json($this->getPurchaseLogs(300));
             return;
@@ -586,13 +616,15 @@ final class AdminController
                 . 'var formRefresh=document.getElementById("edbw-refresh-cache-form");'
                 . 'var progress=document.getElementById("edbw-test-all-progress");'
                 . 'var status=document.getElementById("edbw-test-all-status");'
-                . 'var q=new URLSearchParams(window.location.search);q.set("module","easydcim_bw");q.set("tab","servers");q.set("api","servers_batch");'
-                . 'var apiUrl=window.location.pathname+"?"+q.toString();'
+                . 'var q=new URLSearchParams(window.location.search);q.set("module","easydcim_bw");q.set("tab","servers");'
+                . 'var apiUrlBase=window.location.pathname+"?"+q.toString();'
                 . 'function call(op){'
-                . 'var url=apiUrl+"&op="+encodeURIComponent(op)+"&ajax=1&_="+Date.now();'
+                . 'var actionMap={test:"test_all_services",stop:"stop_test_all_services",reset:"reset_test_all_services",refresh:"refresh_servers_cache"};'
+                . 'var action=(actionMap[op]||"test_all_services");'
+                . 'var url=apiUrlBase+"&action="+encodeURIComponent(action)+"&ajax=1&_="+Date.now();'
                 . 'return fetch(url,{method:"GET",credentials:"same-origin",headers:{"X-Requested-With":"XMLHttpRequest"}})'
                 . '.then(function(r){return r.text();})'
-                . '.then(function(txt){try{return JSON.parse(txt);}catch(e){return {type:"danger",message:"' . addslashes($this->t('servers_test_all_failed')) . '",raw:txt,state:{running:false,total:0,done:0,ok:0,warn:0,fail:0,remaining:0}};}});}'
+                . '.then(function(txt){try{return JSON.parse(txt);}catch(e){return {type:"danger",message:"' . addslashes($this->t('servers_test_all_failed')) . '",raw:(txt||"").slice(0,160),state:{running:false,total:0,done:0,ok:0,warn:0,fail:0,remaining:0}};}});}'
                 . 'function setRunning(v){running=!!v;'
                 . 'if(formCont){formCont.style.display=running?"":"none";}'
                 . 'if(formStop){formStop.style.display=running?"":"none";}'

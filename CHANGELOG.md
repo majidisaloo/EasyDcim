@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.68] - 2026-02-19
+### Fixed
+- Added direct AJAX handlers for `action=test_all_services|stop|reset|refresh` with guaranteed JSON responses.
+- Batch runner JS now calls the standard addon action endpoints (with `ajax=1`) instead of relying only on `api=servers_batch`, improving compatibility on stricter WHMCS/admin setups.
+
 ## [1.67] - 2026-02-19
 ### Fixed
 - Batch background runner in Servers tab now calls the batch API via lightweight `GET` polling to avoid non-JSON POST responses that triggered generic `All services test failed`.

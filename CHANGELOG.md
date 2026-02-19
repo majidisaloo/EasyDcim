@@ -2,6 +2,16 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.41] - 2026-02-19
+### Fixed
+- Health Check custom-field coverage now accepts both product custom fields and product configurable options (`Service ID`, `Order ID`, `Server ID`) so scoped products are detected correctly.
+- Preflight retest now clears the health-check cache before recomputing.
+### Performance
+- Servers tab is now cache-first and no longer performs live EasyDCIM list calls during page render.
+- Added manual `Sync servers now` action for controlled refresh.
+- Removed per-row API service-id resolution from list rendering paths.
+- Added short health-check result cache to reduce repeated heavy calculations.
+
 ## [1.40] - 2026-02-19
 ### Changed
 - Added a dedicated `Health Check` tab and moved heavy preflight/custom-field coverage checks there.

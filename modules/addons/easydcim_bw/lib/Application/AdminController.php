@@ -88,6 +88,7 @@ final class AdminController
             $tab = 'connection';
         }
         if ($action === 'run_preflight') {
+            $this->invalidateHealthCheckCache();
             $flash[] = ['type' => 'info', 'text' => $this->t('preflight_retested')];
             $tab = (string) ($_POST['tab'] ?? 'health');
         }
@@ -121,6 +122,10 @@ final class AdminController
         }
         if ($action === 'test_service_item') {
             $flash[] = $this->testServiceItem();
+            $tab = 'servers';
+        }
+        if ($action === 'refresh_servers_cache') {
+            $flash[] = $this->refreshServersCacheNow();
             $tab = 'servers';
         }
 
@@ -170,12 +175,12 @@ final class AdminController
     {
         $tabs = [
             'dashboard' => $this->t('tab_dashboard'),
-            'health' => $this->t('tab_health'),
             'connection' => $this->t('tab_connection'),
             'settings' => $this->t('tab_settings'),
             'scope' => $this->t('tab_scope'),
             'servers' => $this->t('tab_servers'),
             'packages' => $this->t('tab_packages'),
+            'health' => $this->t('tab_health'),
             'logs' => $this->t('tab_logs'),
         ];
 
@@ -190,7 +195,6 @@ final class AdminController
 
     private function renderDashboardTab(array $version, string $moduleLink): void
     {
-        $lastPollAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
         $apiFailCount = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'api_fail_count')->value('meta_value');
         $updateLock = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
         $releaseTag = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_latest_tag')->value('meta_value');
@@ -205,14 +209,9 @@ final class AdminController
         $this->renderMetricCard($this->t('m_version'), (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
         $this->renderMetricCard($this->t('m_commit'), (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
         $this->renderMetricCard($this->t('m_update_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
-        $this->renderMetricCard($this->t('m_cron_poll'), $lastPollAt !== '' ? $lastPollAt : $this->t('m_no_data'), $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
         $this->renderMetricCard($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
         $this->renderMetricCard($this->t('m_update_lock'), $updateLock ? $this->t('m_locked') : $this->t('m_free'), $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
         $this->renderMetricCard($this->t('m_connection'), $connectionState['text'], $connectionState['state'], '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
-
-        foreach ($this->buildRuntimeStatus() as $card) {
-            $this->renderMetricCard($card['label'], $card['value'], $card['state'], $card['icon']);
-        }
 
         $this->renderMetricCard($this->t('m_latest_release'), $releaseTag !== '' ? $releaseTag : $this->t('m_unknown'), $releaseTag !== '' ? 'ok' : 'neutral', '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"></path></svg>');
         echo '</div>';
@@ -229,6 +228,14 @@ final class AdminController
 
     private function renderHealthTab(): void
     {
+        $lastPollAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
+        echo '<div class="edbw-panel">';
+        echo '<h3>' . htmlspecialchars($this->t('health_cron_title')) . '</h3>';
+        echo '<div class="edbw-metrics">';
+        $this->renderMetricCard($this->t('m_cron_poll'), $lastPollAt !== '' ? $lastPollAt : $this->t('m_no_data'), $lastPollAt !== '' ? 'ok' : 'error', '<svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>');
+        echo '</div>';
+        echo '</div>';
+
         $runtimeCards = $this->buildRuntimeStatus();
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('health_runtime_title')) . '</h3>';
@@ -438,16 +445,8 @@ final class AdminController
         $baseUrl = $this->settings->getString('easydcim_base_url');
         $token = Crypto::safeDecrypt($this->settings->getString('easydcim_api_token'));
         $apiAvailable = $baseUrl !== '' && $token !== '';
-        $easyServices = [];
-
-        if ($apiAvailable) {
-            try {
-                $easyServices = $this->getCachedEasyServices();
-            } catch (\Throwable $e) {
-                $this->logger->log('WARNING', 'servers_tab_list_failed', ['error' => $e->getMessage()]);
-            }
-        }
-        $services = $this->getScopedHostingServices($easyServices, false);
+        $easyServices = $this->getEasyServicesCacheOnly();
+        $services = $this->getScopedHostingServices($easyServices, false, false);
 
         $mappedServiceIds = [];
         foreach ($services as $svc) {
@@ -464,7 +463,16 @@ final class AdminController
             echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_missing')) . '</div>';
         } else {
             echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_api_loaded')) . ': ' . count($easyServices) . '</p>';
-            if (count($easyServices) === 0) {
+            $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_at')->value('meta_value');
+            echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_cache_at')) . ': ' . htmlspecialchars($cacheAt !== '' ? $cacheAt : $this->t('m_no_data')) . '</p>';
+            echo '<form method="post" class="edbw-form-inline">';
+            echo '<input type="hidden" name="tab" value="servers">';
+            echo '<input type="hidden" name="action" value="refresh_servers_cache">';
+            echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_sync_now')) . '</button>';
+            echo '</form>';
+            if (count($easyServices) === 0 && $cacheAt === '') {
+                echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
+            } elseif (count($easyServices) === 0) {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_empty_hint')) . '</div>';
             }
         }
@@ -511,27 +519,14 @@ final class AdminController
         echo '</div>';
     }
 
-    private function getCachedEasyServices(): array
+    private function getEasyServicesCacheOnly(): array
     {
-        $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_at')->value('meta_value');
         $cacheJson = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_list_cache_json')->value('meta_value');
-        if ($cacheAt !== '' && strtotime($cacheAt) > time() - 120 && $cacheJson !== '') {
-            $decoded = json_decode($cacheJson, true);
-            if (is_array($decoded)) {
-                return $decoded;
-            }
+        if ($cacheJson === '') {
+            return [];
         }
-
-        $items = $this->fetchEasyServices();
-        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
-            ['meta_key' => 'servers_list_cache_json'],
-            ['meta_value' => json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
-        );
-        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
-            ['meta_key' => 'servers_list_cache_at'],
-            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
-        );
-        return $items;
+        $decoded = json_decode($cacheJson, true);
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function fetchEasyServices(): array
@@ -862,6 +857,15 @@ final class AdminController
 
     private function buildHealthChecks(): array
     {
+        $cacheJson = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'health_checks_cache_json')->value('meta_value');
+        $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'health_checks_cache_at')->value('meta_value');
+        if ($cacheJson !== '' && $cacheAt !== '' && strtotime($cacheAt) > time() - 300) {
+            $cached = json_decode($cacheJson, true);
+            if (is_array($cached) && !empty($cached)) {
+                return $cached;
+            }
+        }
+
         $checks = [];
         $phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
         $checks[] = ['name' => $this->t('hc_php_version'), 'ok' => $phpOk, 'detail' => $this->t('hc_current') . ': ' . PHP_VERSION . ', ' . $this->t('hc_required') . ': >= 8.0'];
@@ -907,7 +911,23 @@ final class AdminController
             ];
         }
 
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'health_checks_cache_json'],
+            ['meta_value' => json_encode($checks, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'health_checks_cache_at'],
+            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+
         return $checks;
+    }
+
+    private function invalidateHealthCheckCache(): void
+    {
+        Capsule::table('mod_easydcim_bw_guard_meta')
+            ->whereIn('meta_key', ['health_checks_cache_json', 'health_checks_cache_at'])
+            ->delete();
     }
 
     private function buildRuntimeStatus(): array
@@ -1704,14 +1724,30 @@ final class AdminController
         $cfMap = [];
         foreach ($cfRows as $r) {
             $pid = (int) $r->relid;
-            $name = strtolower(trim(explode('|', (string) $r->fieldname)[0]));
+            $name = $this->normalizeFieldKey((string) $r->fieldname);
             $cfMap[$pid][$name] = true;
+        }
+
+        $cfgMap = [];
+        if (Capsule::schema()->hasTable('tblproductconfiglinks') && Capsule::schema()->hasTable('tblproductconfigoptions')) {
+            $cfgRows = Capsule::table('tblproductconfiglinks as l')
+                ->join('tblproductconfigoptions as o', 'o.gid', '=', 'l.gid')
+                ->whereIn('l.pid', $pidList)
+                ->get(['l.pid', 'o.optionname']);
+            foreach ($cfgRows as $r) {
+                $pid = (int) $r->pid;
+                $name = $this->normalizeFieldKey((string) $r->optionname);
+                $cfgMap[$pid][$name] = true;
+            }
         }
 
         $out = [];
         foreach ($products as $p) {
             $pid = (int) $p->id;
             $d = $defaults[$pid] ?? null;
+            $hasService = !empty($cfMap[$pid]['easydcim_service_id']) || !empty($cfgMap[$pid]['easydcim_service_id']);
+            $hasOrder = !empty($cfMap[$pid]['easydcim_order_id']) || !empty($cfgMap[$pid]['easydcim_order_id']);
+            $hasServer = !empty($cfMap[$pid]['easydcim_server_id']) || !empty($cfgMap[$pid]['easydcim_server_id']);
             $out[] = [
                 'pid' => $pid,
                 'name' => (string) $p->name,
@@ -1724,15 +1760,15 @@ final class AdminController
                 'unlimited_total' => $d ? ((int) ($d->unlimited_total ?? 0) === 1) : false,
                 'mode' => $d ? (string) ($d->default_mode ?? 'TOTAL') : 'TOTAL',
                 'action' => $d ? (string) ($d->default_action ?? 'disable_ports') : 'disable_ports',
-                'cf_service' => !empty($cfMap[$pid]['easydcim_service_id']),
-                'cf_order' => !empty($cfMap[$pid]['easydcim_order_id']),
-                'cf_server' => !empty($cfMap[$pid]['easydcim_server_id']),
+                'cf_service' => $hasService,
+                'cf_order' => $hasOrder,
+                'cf_server' => $hasServer,
             ];
         }
         return $out;
     }
 
-    private function getScopedHostingServices(array $easyServiceItems = [], bool $withPortLookup = true): array
+    private function getScopedHostingServices(array $easyServiceItems = [], bool $withPortLookup = true, bool $resolveFromApi = false): array
     {
         $q = Capsule::table('tblhosting as h')
             ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
@@ -1807,7 +1843,7 @@ final class AdminController
                     $resolvedServer = (string) ($easyByOrder[$resolvedOrder]['server_id'] ?? '');
                 }
             }
-            if ($resolvedService === '' && $resolvedOrder !== '' && $resolverClient instanceof EasyDcimClient) {
+            if ($resolveFromApi && $resolvedService === '' && $resolvedOrder !== '' && $resolverClient instanceof EasyDcimClient) {
                 if (array_key_exists($resolvedOrder, $resolvedFromOrder)) {
                     $resolvedService = (string) $resolvedFromOrder[$resolvedOrder];
                 } else {
@@ -1907,6 +1943,43 @@ final class AdminController
         return $out;
     }
 
+    private function normalizeFieldKey(string $name): string
+    {
+        $plain = strtolower(trim(explode('|', $name)[0]));
+        $plain = str_replace(['-', '.', ':'], [' ', ' ', ' '], $plain);
+        $plain = preg_replace('/\s+/', ' ', (string) $plain);
+        $compact = str_replace(' ', '', (string) $plain);
+        if (in_array($compact, ['easydcimserviceid', 'serviceid'], true)) {
+            return 'easydcim_service_id';
+        }
+        if (in_array($compact, ['easydcimorderid', 'orderid'], true)) {
+            return 'easydcim_order_id';
+        }
+        if (in_array($compact, ['easydcimserverid', 'serverid'], true)) {
+            return 'easydcim_server_id';
+        }
+        return $compact;
+    }
+
+    private function refreshServersCacheNow(): array
+    {
+        try {
+            $items = $this->fetchEasyServices();
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'servers_list_cache_json'],
+                ['meta_value' => json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'servers_list_cache_at'],
+                ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            return ['type' => 'success', 'text' => $this->t('servers_cache_refreshed') . ': ' . count($items)];
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'servers_cache_refresh_failed', ['error' => $e->getMessage()]);
+            return ['type' => 'danger', 'text' => $this->t('servers_cache_refresh_failed') . ': ' . $e->getMessage()];
+        }
+    }
+
     private function getScopedClientEmails(int $limit = 40): array
     {
         $q = Capsule::table('tblhosting as h')
@@ -1932,30 +2005,34 @@ final class AdminController
             return [];
         }
 
-        $fields = Capsule::table('tblcustomfields')
-            ->where('type', 'product')
-            ->get(['id', 'fieldname']);
-        $aliases = [
-            'easydcim_service_id' => 'easydcim_service_id',
-            'service id' => 'easydcim_service_id',
-            'serviceid' => 'easydcim_service_id',
-            'easydcim order id' => 'easydcim_order_id',
-            'easydcim_order_id' => 'easydcim_order_id',
-            'order id' => 'easydcim_order_id',
-            'orderid' => 'easydcim_order_id',
-            'easydcim server id' => 'easydcim_server_id',
-            'easydcim_server_id' => 'easydcim_server_id',
-            'server id' => 'easydcim_server_id',
-            'serverid' => 'easydcim_server_id',
-        ];
-        $fieldById = [];
-        foreach ($fields as $f) {
-            $normalized = strtolower(trim(explode('|', (string) $f->fieldname)[0]));
-            if (!isset($aliases[$normalized])) {
-                continue;
+        static $fieldByIdCache = null;
+        if ($fieldByIdCache === null) {
+            $fields = Capsule::table('tblcustomfields')
+                ->where('type', 'product')
+                ->get(['id', 'fieldname']);
+            $aliases = [
+                'easydcim_service_id' => 'easydcim_service_id',
+                'service id' => 'easydcim_service_id',
+                'serviceid' => 'easydcim_service_id',
+                'easydcim order id' => 'easydcim_order_id',
+                'easydcim_order_id' => 'easydcim_order_id',
+                'order id' => 'easydcim_order_id',
+                'orderid' => 'easydcim_order_id',
+                'easydcim server id' => 'easydcim_server_id',
+                'easydcim_server_id' => 'easydcim_server_id',
+                'server id' => 'easydcim_server_id',
+                'serverid' => 'easydcim_server_id',
+            ];
+            $fieldByIdCache = [];
+            foreach ($fields as $f) {
+                $normalized = strtolower(trim(explode('|', (string) $f->fieldname)[0]));
+                if (!isset($aliases[$normalized])) {
+                    continue;
+                }
+                $fieldByIdCache[(int) $f->id] = $aliases[$normalized];
             }
-            $fieldById[(int) $f->id] = $aliases[$normalized];
         }
+        $fieldById = $fieldByIdCache;
         if (empty($fieldById)) {
             return [];
         }
@@ -2387,6 +2464,7 @@ final class AdminController
             'hc_missing' => 'ناموجود',
             'preflight_checks' => 'بررسی‌های پیش از اجرا',
             'preflight_retested' => 'بررسی پیش از اجرا دوباره انجام شد.',
+            'health_cron_title' => 'وضعیت کرون',
             'retest' => 'تست مجدد',
             'check' => 'چک',
             'details' => 'جزئیات',
@@ -2404,6 +2482,11 @@ final class AdminController
             'rt_test_mode_on' => 'فعال (Dry Run)',
             'rt_test_mode_off' => 'غیرفعال',
             'health_runtime_title' => 'وضعیت اجرا و کرون',
+            'servers_cache_at' => 'آخرین به‌روزرسانی کش سرورها',
+            'servers_sync_now' => 'همگام‌سازی سرورها (دستی)',
+            'servers_cache_empty_hint' => 'کش سرورها خالی است. برای جلوگیری از کندی، لیست با همگام‌سازی دستی یا کرون پر می‌شود.',
+            'servers_cache_refreshed' => 'کش سرورها به‌روزرسانی شد',
+            'servers_cache_refresh_failed' => 'به‌روزرسانی کش سرورها ناموفق بود',
         ];
         $en = [
             'subtitle' => 'Bandwidth control center for EasyDCIM services',
@@ -2567,6 +2650,7 @@ final class AdminController
             'hc_missing' => 'Missing',
             'preflight_checks' => 'Preflight Checks',
             'preflight_retested' => 'Preflight retest completed.',
+            'health_cron_title' => 'Cron Status',
             'retest' => 'Retest',
             'check' => 'Check',
             'details' => 'Details',
@@ -2584,6 +2668,11 @@ final class AdminController
             'rt_test_mode_on' => 'Enabled (Dry Run)',
             'rt_test_mode_off' => 'Disabled',
             'health_runtime_title' => 'Runtime and Cron Status',
+            'servers_cache_at' => 'Servers cache last update',
+            'servers_sync_now' => 'Sync servers now',
+            'servers_cache_empty_hint' => 'Servers cache is empty. To avoid page slowness, list is loaded by manual sync or cron.',
+            'servers_cache_refreshed' => 'Servers cache refreshed',
+            'servers_cache_refresh_failed' => 'Servers cache refresh failed',
         ];
         $map = $this->isFa ? $fa : $en;
         return $map[$key] ?? $key;

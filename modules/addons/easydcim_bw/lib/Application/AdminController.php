@@ -584,12 +584,12 @@ final class AdminController
             echo '<input type="hidden" name="action" value="test_all_services">';
             echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
             echo '</form>';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-stop-form" style="' . ($runningNow ? '' : 'display:none;') . '">';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-stop-form">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="stop_test_all_services">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_stop')) . '</button>';
             echo '</form>';
-            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-reset-form" style="' . ($runningNow ? '' : 'display:none;') . '">';
+            echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-test-all-reset-form">';
             echo '<input type="hidden" name="tab" value="servers">';
             echo '<input type="hidden" name="action" value="reset_test_all_services">';
             echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('servers_test_all_reset')) . '</button>';
@@ -642,8 +642,8 @@ final class AdminController
                 . '});}'
                 . 'function setRunning(v){running=!!v;'
                 . 'if(formCont){formCont.style.display=running?"":"none";}'
-                . 'if(formStop){formStop.style.display=running?"":"none";}'
-                . 'if(formReset){formReset.style.display=running?"":"none";}'
+                . 'if(formStop){formStop.style.display="";}'
+                . 'if(formReset){formReset.style.display="";}'
                 . '}'
                 . 'function render(payload){'
                 . 'if(!payload){return;}'
@@ -1681,6 +1681,7 @@ final class AdminController
             $orderId = trim((string) ($target['easydcim_order_id'] ?? ''));
             $serverId = trim((string) ($target['easydcim_server_id'] ?? ''));
             $ip = trim((string) ($target['ip'] ?? ''));
+            $portsEndpointMode = trim((string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'ports_endpoint_mode')->value('meta_value'));
             if (!$bulkMode && $orderId === '' && $serverId !== '') {
                 $orderId = $this->resolveOrderIdFromServer($client, $serverId, $ip);
             }
@@ -1720,38 +1721,43 @@ final class AdminController
                 if (!empty($orderPortPrimary['ok'])) {
                     $response = ['http_code' => 200, 'data' => ['ports' => $orderPortPrimary['items']], 'error' => ''];
                     $mode = 'order_details_ports:bulk';
+                } elseif ($portsEndpointMode === 'order_only' || !empty($orderPortPrimary['reachable'])) {
+                    $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
+                    $mode = 'order_id_only:bulk';
                 }
             }
 
-            foreach ($serviceCandidates as $candidate) {
-                if ($mode !== 'none') {
-                    break;
-                }
-                $candidateId = (string) ($candidate['id'] ?? '');
-                $candidateSource = (string) ($candidate['source'] ?? 'candidate');
-                $candidateResp = $client->ports($candidateId, true, $email, false);
-                $candidateCode = (int) ($candidateResp['http_code'] ?? 0);
-                if ($candidateCode >= 200 && $candidateCode < 300) {
-                    $response = $candidateResp;
-                    $mode = 'service_id:' . $candidateSource;
-                    break;
-                }
-                if (($candidateCode === 401 || $candidateCode === 403 || $candidateCode === 422) && $useImpersonation) {
-                    $fallbackClient = new EasyDcimClient($baseUrl, $token, false, $this->logger, $this->proxyConfig());
-                    $fallbackResp = $fallbackClient->ports($candidateId, true, null, false);
-                    $fallbackCode = (int) ($fallbackResp['http_code'] ?? 0);
-                    if ($fallbackCode >= 200 && $fallbackCode < 300) {
-                        $response = $fallbackResp;
-                        $mode = 'service_id:' . $candidateSource . ':no_impersonation';
+            if (!($bulkMode && $mode !== 'none' && str_starts_with($mode, 'order_'))) {
+                foreach ($serviceCandidates as $candidate) {
+                    if ($mode !== 'none') {
                         break;
                     }
-                    if ($fallbackCode !== 0) {
-                        $candidateResp = $fallbackResp;
-                        $candidateCode = $fallbackCode;
+                    $candidateId = (string) ($candidate['id'] ?? '');
+                    $candidateSource = (string) ($candidate['source'] ?? 'candidate');
+                    $candidateResp = $client->ports($candidateId, true, $email, false);
+                    $candidateCode = (int) ($candidateResp['http_code'] ?? 0);
+                    if ($candidateCode >= 200 && $candidateCode < 300) {
+                        $response = $candidateResp;
+                        $mode = 'service_id:' . $candidateSource;
+                        break;
                     }
-                }
-                if ((int) ($response['http_code'] ?? 0) === 0 || $candidateCode > (int) ($response['http_code'] ?? 0)) {
-                    $response = $candidateResp;
+                    if (($candidateCode === 401 || $candidateCode === 403 || $candidateCode === 422) && $useImpersonation) {
+                        $fallbackClient = new EasyDcimClient($baseUrl, $token, false, $this->logger, $this->proxyConfig());
+                        $fallbackResp = $fallbackClient->ports($candidateId, true, null, false);
+                        $fallbackCode = (int) ($fallbackResp['http_code'] ?? 0);
+                        if ($fallbackCode >= 200 && $fallbackCode < 300) {
+                            $response = $fallbackResp;
+                            $mode = 'service_id:' . $candidateSource . ':no_impersonation';
+                            break;
+                        }
+                        if ($fallbackCode !== 0) {
+                            $candidateResp = $fallbackResp;
+                            $candidateCode = $fallbackCode;
+                        }
+                    }
+                    if ((int) ($response['http_code'] ?? 0) === 0 || $candidateCode > (int) ($response['http_code'] ?? 0)) {
+                        $response = $candidateResp;
+                    }
                 }
             }
 
@@ -1787,6 +1793,10 @@ final class AdminController
                     $code = 200;
                     $err = '';
                     $mode = 'order_details_only';
+                    Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                        ['meta_key' => 'ports_endpoint_mode'],
+                        ['meta_value' => 'order_only', 'updated_at' => date('Y-m-d H:i:s')]
+                    );
                     $this->logger->log('INFO', 'server_item_test_order_only', [
                         'serviceid' => $serviceId,
                         'order_id' => $orderIdForFallback,
@@ -1800,6 +1810,10 @@ final class AdminController
                 $code = 200;
                 $err = '';
                 $mode = 'order_id_only';
+                Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                    ['meta_key' => 'ports_endpoint_mode'],
+                    ['meta_value' => 'order_only', 'updated_at' => date('Y-m-d H:i:s')]
+                );
                 $this->logger->log('INFO', 'server_item_test_order_only_forced', [
                     'serviceid' => $serviceId,
                     'order_id' => $orderIdForFallback,

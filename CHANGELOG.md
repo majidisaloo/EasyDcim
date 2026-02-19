@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.83] - 2026-02-19
+### Changed
+- Servers batch tester now learns blocked client-ports access mode and prioritizes `order`-based path in bulk runs, reducing redundant API calls and improving progress speed.
+### Fixed
+- `Stop` and `Reset` controls in Servers batch UI are now always visible and no longer disappear during state transitions.
+
 ## [1.82] - 2026-02-19
 ### Fixed
 - Hardened Servers batch JS runner against zero/invalid AJAX state while queue still has work.

@@ -1768,6 +1768,23 @@ final class AdminController
                     $mode = 'order_details_ports';
                 }
             }
+            if (($code === 401 || $code === 403 || $code === 422) && $orderIdForFallback !== '' && $mode === 'none') {
+                // If order is reachable in admin API but client ports endpoint is restricted/inactive, do not hard-fail.
+                $prevCode = $code;
+                $orderCheck = $client->orderDetails($orderIdForFallback);
+                $orderCode = (int) ($orderCheck['http_code'] ?? 0);
+                if ($orderCode >= 200 && $orderCode < 300) {
+                    $response = ['http_code' => 200, 'data' => ['ports' => []], 'error' => ''];
+                    $code = 200;
+                    $err = '';
+                    $mode = 'order_details_only';
+                    $this->logger->log('INFO', 'server_item_test_order_only', [
+                        'serviceid' => $serviceId,
+                        'order_id' => $orderIdForFallback,
+                        'prev_http_code' => $prevCode,
+                    ]);
+                }
+            }
             $ok = $code >= 200 && $code < 300;
             $statusType = 'warning';
             $summary = $this->t('no_data');

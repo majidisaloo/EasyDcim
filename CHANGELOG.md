@@ -2,6 +2,13 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.77] - 2026-02-19
+### Fixed
+- Manual/Batch service test now downgrades to `order_details_only` when:
+  - `client/services/{id}/ports` returns `401/403/422`
+  - and `admin/orders/{order_id}` is reachable (`HTTP 200`).
+- This prevents hard-fail on environments where client ports endpoint is restricted for that account while admin order mapping is valid.
+
 ## [1.76] - 2026-02-19
 ### Fixed
 - Improved order-details ports fallback parser to detect more EasyDCIM payload variants (`number`, `port_number`, `user_label`, connection keys, and `ports` parent context).

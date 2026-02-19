@@ -47,6 +47,8 @@ final class EasyDcimClient
         $candidates = [
             '/api/v3/client/items/' . rawurlencode($serverId) . '/ports' . $query,
             '/api/v3/client/servers/' . rawurlencode($serverId) . '/ports' . $query,
+            '/api/v3/admin/items/' . rawurlencode($serverId) . '/ports' . $query,
+            '/api/v3/admin/servers/' . rawurlencode($serverId) . '/ports' . $query,
         ];
 
         foreach ($candidates as $path) {

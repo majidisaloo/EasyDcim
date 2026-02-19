@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.87] - 2026-02-19
+### Fixed
+- Added hard fallback submit path for `Test All` when AJAX response is invalid/blocked, so bulk test never stays idle.
+- Improved Servers-tab batch UX resilience: keeps message/state and auto-recovers by switching to standard action when needed.
+- Extended server-port lookup candidates with admin endpoints:
+  - `/api/v3/admin/items/{id}/ports`
+  - `/api/v3/admin/servers/{id}/ports`
+
 ## [1.86] - 2026-02-19
 ### Fixed
 - `Test All` in Servers tab now runs fully via AJAX without forced page-refresh fallback loops during normal operation.

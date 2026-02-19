@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.52] - 2026-02-19
+### Fixed
+- Clarified Servers table `PID` meaning by renaming it to `Product ID` (WHMCS product identifier, not port ID).
+- Improved port parsing from EasyDCIM payloads (`client/services/.../ports` and order-details fallback) to capture:
+  - `port_id`
+  - `connected_item_id` (switch/item)
+  - `connected_port_id`
+  - broader up-state detection (`accepted` and related flags)
+### Changed
+- `server_item_test` logs now include extracted `port_ids`, `connected_port_ids`, and `connected_item_ids` for precise troubleshooting.
+
 ## [1.51] - 2026-02-19
 ### Fixed
 - Resolved `servers cache refresh` SQL failure on older installs where `mod_easydcim_bw_guard_service_state.easydcim_server_id` did not exist.

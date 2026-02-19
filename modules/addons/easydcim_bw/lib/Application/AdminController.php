@@ -503,7 +503,7 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>PID</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>' . htmlspecialchars($this->t('product_id')) . '</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
         foreach ($services as $svc) {
             $testCache = $this->getServiceTestCache((int) $svc['serviceid']);
             $portsLabel = (string) $svc['ports_summary'];
@@ -1420,6 +1420,9 @@ final class AdminController
             $networkPorts = 0;
             $networkUp = 0;
             $networkTraffic = 0.0;
+            $portIds = [];
+            $connectedPortIds = [];
+            $connectedItemIds = [];
             foreach ($items as $p) {
                 if (!$this->isNetworkPortCandidate((string) ($p['name'] ?? ''), (string) ($p['description'] ?? ''), (string) ($p['type'] ?? ''))) {
                     continue;
@@ -1429,6 +1432,18 @@ final class AdminController
                     $networkUp++;
                 }
                 $networkTraffic += (float) ($p['traffic_total'] ?? 0.0);
+                $pid = trim((string) ($p['port_id'] ?? ''));
+                $cpid = trim((string) ($p['connected_port_id'] ?? ''));
+                $ciid = trim((string) ($p['connected_item_id'] ?? ''));
+                if ($pid !== '') {
+                    $portIds[$pid] = true;
+                }
+                if ($cpid !== '') {
+                    $connectedPortIds[$cpid] = true;
+                }
+                if ($ciid !== '') {
+                    $connectedItemIds[$ciid] = true;
+                }
             }
 
             if (($mode === 'none' || $mode === 'server_id_only') && $err === '') {
@@ -1467,6 +1482,9 @@ final class AdminController
                 'network_ports' => $networkPorts,
                 'network_ports_up' => $networkUp,
                 'network_traffic_total' => $networkTraffic,
+                'port_ids' => array_values(array_keys($portIds)),
+                'connected_port_ids' => array_values(array_keys($connectedPortIds)),
+                'connected_item_ids' => array_values(array_keys($connectedItemIds)),
                 'easydcim_service_id' => (string) ($target['easydcim_service_id'] ?? ''),
                 'easydcim_server_id' => (string) ($target['easydcim_server_id'] ?? ''),
                 'easydcim_order_id' => (string) ($target['easydcim_order_id'] ?? ''),
@@ -2688,24 +2706,34 @@ final class AdminController
         $result = [];
         if (is_array($value)) {
             $lowerKeys = array_map(static fn ($k): string => strtolower((string) $k), array_keys($value));
-            $looksLikePort = in_array('name', $lowerKeys, true)
+            $looksLikePort = in_array('id', $lowerKeys, true)
+                || in_array('name', $lowerKeys, true)
                 || in_array('port', $lowerKeys, true)
                 || in_array('port_id', $lowerKeys, true)
                 || in_array('portid', $lowerKeys, true)
                 || in_array('interface', $lowerKeys, true);
 
             if ($looksLikePort) {
+                $portId = trim((string) ($value['id'] ?? $value['port_id'] ?? $value['portId'] ?? $value['portid'] ?? ''));
                 $name = (string) ($value['name'] ?? $value['port'] ?? $value['interface'] ?? $value['label'] ?? 'port');
-                $status = strtolower((string) ($value['status'] ?? $value['state'] ?? ''));
-                $isUp = in_array($status, ['up', 'active', 'enabled', 'online'], true)
-                    || ((int) ($value['is_up'] ?? $value['up'] ?? 0) === 1);
+                if ($portId !== '' && !str_contains($name, '#' . $portId)) {
+                    $name = '#' . $portId . ' ' . $name;
+                }
+                $status = strtolower((string) ($value['status'] ?? $value['state'] ?? $value['admin_state'] ?? ''));
+                $isUp = in_array($status, ['up', 'active', 'enabled', 'online', 'accepted'], true)
+                    || ((int) ($value['is_up'] ?? $value['up'] ?? $value['is_active'] ?? $value['enabled'] ?? 0) === 1);
                 $traffic = (float) ($value['traffic_total'] ?? $value['total'] ?? $value['usage'] ?? 0.0);
+                $connectedItemId = trim((string) ($value['connected_item_id'] ?? $value['conn_item_id'] ?? $value['item_id'] ?? ''));
+                $connectedPortId = trim((string) ($value['connected_port_id'] ?? $value['conn_port_id'] ?? $value['connected_port'] ?? ''));
                 $result[] = [
                     'name' => $name,
                     'description' => (string) ($value['description'] ?? ''),
                     'type' => (string) ($value['type'] ?? ''),
                     'is_up' => $isUp,
                     'traffic_total' => $traffic,
+                    'port_id' => $portId,
+                    'connected_item_id' => $connectedItemId,
+                    'connected_port_id' => $connectedPortId,
                 ];
             }
 
@@ -2853,6 +2881,12 @@ final class AdminController
             $name = (string) ($row['name'] ?? $row['label'] ?? '');
             $desc = (string) ($row['description'] ?? $row['note'] ?? '');
             $type = (string) ($row['type'] ?? $row['port_type'] ?? '');
+            $portId = trim((string) ($row['id'] ?? $row['port_id'] ?? $row['portId'] ?? $row['portid'] ?? ''));
+            if ($name === '' && $portId !== '') {
+                $name = '#' . $portId;
+            } elseif ($name !== '' && $portId !== '' && !str_contains($name, '#' . $portId)) {
+                $name = '#' . $portId . ' ' . $name;
+            }
             $state = strtolower((string) ($row['status'] ?? $row['state'] ?? ''));
             $upRaw = $row['is_up'] ?? $row['up'] ?? null;
             $isUp = false;
@@ -2863,7 +2897,7 @@ final class AdminController
             } elseif (is_string($upRaw) && $upRaw !== '') {
                 $isUp = in_array(strtolower($upRaw), ['1', 'true', 'up', 'active', 'enabled', 'online'], true);
             } else {
-                $isUp = in_array($state, ['up', 'active', 'enabled', 'online'], true);
+                $isUp = in_array($state, ['up', 'active', 'enabled', 'online', 'accepted'], true);
             }
             $trafficTotal = (float) ($row['traffic_total'] ?? $row['total'] ?? $row['total_1m'] ?? 0.0);
             $out[] = [
@@ -2872,6 +2906,9 @@ final class AdminController
                 'type' => $type,
                 'is_up' => $isUp,
                 'traffic_total' => $trafficTotal,
+                'port_id' => $portId,
+                'connected_item_id' => trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['item_id'] ?? '')),
+                'connected_port_id' => trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['connected_port'] ?? '')),
             ];
         }
 
@@ -2989,6 +3026,7 @@ final class AdminController
             'out_label' => 'آپلود',
             'total_label' => 'مجموع',
             'product' => 'محصول',
+            'product_id' => 'شناسه محصول',
             'cf_check' => 'بررسی CF',
             'unlimited_label' => 'نامحدود (IN/OUT/TOTAL)',
             'action' => 'اقدام',
@@ -3183,6 +3221,7 @@ final class AdminController
             'out_label' => 'Upload',
             'total_label' => 'Total',
             'product' => 'Product',
+            'product_id' => 'Product ID',
             'cf_check' => 'CF Check',
             'unlimited_label' => 'Unlimited IN/OUT/TOTAL',
             'action' => 'Action',

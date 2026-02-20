@@ -894,6 +894,14 @@ final class AdminController
             $iloIp = trim((string) ($easyItem['ilo_ip'] ?? ''));
             $labelText = trim((string) ($easyItem['label'] ?? ''));
             $easyHost = trim((string) ($easyItem['hostname'] ?? ''));
+            if ($svcServerId !== '' && $resolverClient instanceof EasyDcimClient) {
+                if ($labelText === '') {
+                    $labelText = $this->resolveItemLabelCached($resolverClient, $svcServerId);
+                }
+                if ($iloIp === '') {
+                    $iloIp = $this->resolveItemIloIpCached($resolverClient, $svcServerId);
+                }
+            }
             $productId = (int) ($svc['pid'] ?? 0);
             $productName = trim((string) ($svc['product_name'] ?? ''));
             if ($productName === '') {
@@ -929,18 +937,12 @@ final class AdminController
                 [$this->t('traffic_cycle'), $cycleText],
                 [$this->t('traffic_last_check'), $lastCheck !== '' ? $lastCheck : $this->t('m_no_data')],
             ];
-            if ($domain !== '' && strcasecmp($domain, $publicIp) !== 0) {
-                $clientHtml .= '<div class="edbw-help">' . htmlspecialchars($domain) . '</div>';
-            }
-            if ($publicIp !== '') {
-                $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">IP</span><span>' . htmlspecialchars($publicIp) . '</span></div>';
-            }
-            if ($iloIp !== '' && strcasecmp($iloIp, $publicIp) !== 0) {
-                $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">iLO</span><span>' . htmlspecialchars($iloIp) . '</span></div>';
-            }
-            if ($labelText !== '') {
-                $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">Label</span><span>' . htmlspecialchars($labelText) . '</span></div>';
-            }
+            $whmcsHost = $domain !== '' ? $domain : '-';
+            $whmcsIp = $publicIp !== '' ? $publicIp : '-';
+            $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">' . ($this->isFa ? 'هاست نیم' : 'Hostname') . '</span><span>' . htmlspecialchars($whmcsHost) . '</span></div>';
+            $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">IP</span><span>' . htmlspecialchars($whmcsIp) . '</span></div>';
+            $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">Label</span><span>' . htmlspecialchars($labelText !== '' ? $labelText : '-') . '</span></div>';
+            $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">iLO</span><span>' . htmlspecialchars($iloIp !== '' ? $iloIp : '-') . '</span></div>';
             $detailPayload = ['title' => $serviceMainLabel, 'rows' => $detailRows];
             $detailPayloadAttr = htmlspecialchars((string) json_encode($detailPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8');
             $detailHtml = '<button type="button" class="btn btn-default edbw-detail-open" data-edbw-detail="' . $detailPayloadAttr . '">' . htmlspecialchars($this->t('details')) . '</button>';
@@ -5952,6 +5954,30 @@ final class AdminController
                 'error' => $e->getMessage(),
             ]);
             $this->itemLabelRuntimeCache[$itemId] = '';
+            return '';
+        }
+    }
+
+    private function resolveItemIloIpCached(EasyDcimClient $client, string $itemId): string
+    {
+        $itemId = trim($itemId);
+        if ($itemId === '') {
+            return '';
+        }
+
+        try {
+            $response = $client->serverDetailsById($itemId);
+            $code = (int) ($response['http_code'] ?? 0);
+            if ($code < 200 || $code >= 300) {
+                return '';
+            }
+            $payload = $this->extractApiDataPayload($response);
+            return $this->extractManagementIp($payload);
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'resolve_item_ilo_failed', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
             return '';
         }
     }

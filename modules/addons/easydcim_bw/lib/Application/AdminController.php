@@ -402,7 +402,7 @@ final class AdminController
         echo '<input type="hidden" name="action" value="save_settings">';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('module_status')) . '</label><select name="module_enabled"><option value="1"' . ((string) $s->getString('module_enabled', '1') === '1' ? ' selected' : '') . '>' . htmlspecialchars($this->t('active')) . '</option><option value="0"' . ((string) $s->getString('module_enabled', '1') === '0' ? ' selected' : '') . '>' . htmlspecialchars($this->t('disabled')) . '</option></select><span class="edbw-help">' . htmlspecialchars($this->t('module_status_help')) . '</span></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('ui_language')) . '</label><select name="ui_language"><option value="auto"' . ($s->getString('ui_language', 'auto') === 'auto' ? ' selected' : '') . '>' . htmlspecialchars($this->t('lang_default')) . '</option><option value="english"' . ($s->getString('ui_language', 'auto') === 'english' ? ' selected' : '') . '>English</option><option value="farsi"' . ($s->getString('ui_language', 'auto') === 'farsi' ? ' selected' : '') . '>فارسی</option></select></div>';
-        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('poll_interval')) . '</label><input type="number" min="5" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('poll_interval')) . '</label><input type="number" min="1" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('graph_cache')) . '</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
 
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_enabled')) . '</label><input type="checkbox" name="autobuy_enabled" value="1" ' . ($s->getBool('autobuy_enabled') ? 'checked' : '') . '></div>';
@@ -1303,36 +1303,15 @@ final class AdminController
     {
         $search = trim((string) ($_REQUEST['traffic_q'] ?? ''));
         $focusServiceId = (int) ($_REQUEST['focus_serviceid'] ?? 0);
-        $q = Capsule::table('mod_easydcim_bw_guard_service_state as s')
-            ->join('tblhosting as h', 'h.id', '=', 's.serviceid')
-            ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
-            ->whereIn('h.domainstatus', ['Active', 'Suspended'])
-            ->select([
-                's.serviceid',
-                's.userid',
-                'h.packageid as pid',
-                'h.dedicatedip',
-                'h.domain',
-                'c.email',
-                's.easydcim_service_id',
-                's.easydcim_order_id',
-                's.easydcim_server_id',
-                's.last_used_gb',
-                's.last_remaining_gb',
-                's.last_status',
-                's.mode',
-                's.last_check_at',
-                's.cycle_start',
-                's.cycle_end',
-                'c.firstname',
-                'c.lastname',
-            ]);
-        $this->applyScopeFilter($q);
-        $rows = $q->orderByDesc('s.last_check_at')->orderByDesc('s.serviceid')->limit(300)->get();
+        $rows = $this->loadTrafficSnapshotRows();
+        if (empty($rows)) {
+            $rows = $this->refreshTrafficSnapshot(true);
+        }
+
         $defaultsByPid = [];
         $pidList = [];
         foreach ($rows as $r) {
-            $pid = (int) ($r->pid ?? 0);
+            $pid = (int) ($r['pid'] ?? 0);
             if ($pid > 0) {
                 $pidList[$pid] = $pid;
             }
@@ -1346,6 +1325,7 @@ final class AdminController
                 $defaultsByPid[(int) $dr->pid] = $dr;
             }
         }
+
         $easyServices = $this->getEasyServicesCacheOnly();
         $easyByService = [];
         $easyByOrder = [];
@@ -1367,11 +1347,12 @@ final class AdminController
                 $easyByServer[$srv] = $item;
             }
         }
+
         if ($search !== '') {
-            $rows = $rows->filter(function ($row) use ($search, $easyByService, $easyByOrder, $easyByServer): bool {
-                $serviceId = trim((string) ($row->easydcim_service_id ?? ''));
-                $orderId = trim((string) ($row->easydcim_order_id ?? ''));
-                $serverId = trim((string) ($row->easydcim_server_id ?? ''));
+            $rows = array_values(array_filter($rows, function (array $row) use ($search, $easyByService, $easyByOrder, $easyByServer): bool {
+                $serviceId = trim((string) ($row['easydcim_service_id'] ?? ''));
+                $orderId = trim((string) ($row['easydcim_order_id'] ?? ''));
+                $serverId = trim((string) ($row['easydcim_server_id'] ?? ''));
                 $easyItem = $serviceId !== '' && isset($easyByService[$serviceId]) ? $easyByService[$serviceId] : [];
                 if (empty($easyItem) && $orderId !== '' && isset($easyByOrder[$orderId])) {
                     $easyItem = $easyByOrder[$orderId];
@@ -1380,24 +1361,24 @@ final class AdminController
                     $easyItem = $easyByServer[$serverId];
                 }
                 return $this->matchesSearchTerm([
-                    (string) ($row->serviceid ?? ''),
-                    (string) ($row->userid ?? ''),
-                    (string) ($row->pid ?? ''),
-                    (string) ($row->dedicatedip ?? ''),
-                    (string) ($row->domain ?? ''),
-                    (string) ($row->firstname ?? ''),
-                    (string) ($row->lastname ?? ''),
-                    (string) ($row->email ?? ''),
-                    (string) ($row->easydcim_service_id ?? ''),
-                    (string) ($row->easydcim_order_id ?? ''),
-                    (string) ($row->easydcim_server_id ?? ''),
+                    (string) ($row['serviceid'] ?? ''),
+                    (string) ($row['userid'] ?? ''),
+                    (string) ($row['pid'] ?? ''),
+                    (string) ($row['dedicatedip'] ?? ''),
+                    (string) ($row['domain'] ?? ''),
+                    (string) ($row['firstname'] ?? ''),
+                    (string) ($row['lastname'] ?? ''),
+                    (string) ($row['email'] ?? ''),
+                    (string) ($row['easydcim_service_id'] ?? ''),
+                    (string) ($row['easydcim_order_id'] ?? ''),
+                    (string) ($row['easydcim_server_id'] ?? ''),
                     (string) ($easyItem['label'] ?? ''),
                     (string) ($easyItem['ilo_ip'] ?? ''),
                     (string) ($easyItem['ip'] ?? ''),
                     (string) ($easyItem['client_name'] ?? ''),
                     (string) ($easyItem['client_email'] ?? ''),
                 ], $search);
-            });
+            }));
         }
 
         echo '<div class="edbw-panel">';
@@ -1423,32 +1404,25 @@ final class AdminController
             . htmlspecialchars($this->t('details')) . '</th></tr></thead><tbody>';
 
         foreach ($rows as $r) {
-            $serviceId = (int) ($r->serviceid ?? 0);
-            $userId = (int) ($r->userid ?? 0);
-            $pid = (int) ($r->pid ?? 0);
-            $used = (float) ($r->last_used_gb ?? 0.0);
-            $remaining = (float) ($r->last_remaining_gb ?? 0.0);
+            $serviceId = (int) ($r['serviceid'] ?? 0);
+            $userId = (int) ($r['userid'] ?? 0);
+            $pid = (int) ($r['pid'] ?? 0);
+            $used = (float) ($r['last_used_gb'] ?? 0.0);
+            $remaining = (float) ($r['last_remaining_gb'] ?? 0.0);
             $allowed = max(0.0, $used + $remaining);
-            $clientName = trim((string) ($r->firstname ?? '') . ' ' . (string) ($r->lastname ?? ''));
+            $clientName = trim((string) ($r['firstname'] ?? '') . ' ' . (string) ($r['lastname'] ?? ''));
             if ($clientName === '') {
                 $clientName = '#' . $userId;
             }
-            $mode = strtoupper(trim((string) ($r->mode ?? 'TOTAL')));
-            $cycleStart = trim((string) ($r->cycle_start ?? ''));
-            $cycleEnd = trim((string) ($r->cycle_end ?? ''));
-            $extra = ($cycleStart !== '' && $cycleEnd !== '')
-                ? (float) Capsule::table('mod_easydcim_bw_guard_purchases')
-                    ->where('whmcs_serviceid', $serviceId)
-                    ->where('cycle_start', $cycleStart)
-                    ->where('cycle_end', $cycleEnd)
-                    ->where('payment_status', 'paid')
-                    ->sum('size_gb')
-                : 0.0;
+            $mode = strtoupper(trim((string) ($r['mode'] ?? 'TOTAL')));
+            $cycleStart = trim((string) ($r['cycle_start'] ?? ''));
+            $cycleEnd = trim((string) ($r['cycle_end'] ?? ''));
+            $extra = (float) ($r['extra_gb'] ?? 0.0);
             $cycle = $cycleStart !== '' && $cycleEnd !== ''
                 ? ($cycleStart . ' -> ' . $cycleEnd)
                 : $this->t('m_no_data');
-            $status = $this->domainStatusLabel((string) ($r->last_status ?? ''));
-            $checkedAt = trim((string) ($r->last_check_at ?? ''));
+            $status = $this->domainStatusLabel((string) ($r['last_status'] ?? ''));
+            $checkedAt = trim((string) ($r['last_check_at'] ?? ''));
             if ($checkedAt === '') {
                 $checkedAt = $this->t('m_no_data');
             }
@@ -1469,7 +1443,7 @@ final class AdminController
             echo '<td><details class="edbw-traffic-detail"><summary>' . htmlspecialchars($this->t('details')) . '</summary>'
                 . '<div class="edbw-traffic-detail-body">'
                 . '<div><strong>' . htmlspecialchars($this->t('product_id')) . ':</strong> ' . $pid . '</div>'
-                . '<div><strong>IP:</strong> ' . htmlspecialchars((string) ($r->dedicatedip ?? '-')) . '</div>'
+                . '<div><strong>IP:</strong> ' . htmlspecialchars((string) ($r['dedicatedip'] ?? '-')) . '</div>'
                 . '<div><strong>' . htmlspecialchars($this->t('mode')) . ':</strong> ' . htmlspecialchars($mode) . '</div>'
                 . '<div><strong>' . htmlspecialchars($this->t('base_quota')) . ':</strong> ' . number_format(max(0.0, $allowed - $extra), 2, '.', '') . ' GB</div>'
                 . '<div><strong>' . htmlspecialchars($this->t('extra_quota')) . ':</strong> ' . number_format($extra, 2, '.', '') . ' GB</div>'
@@ -1480,12 +1454,177 @@ final class AdminController
             echo '</tr>';
         }
 
-        if ($rows->isEmpty()) {
+        if (empty($rows)) {
             echo '<tr><td colspan="10">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
 
         echo '</tbody></table></div>';
         echo '</div>';
+    }
+
+    public function refreshTrafficSnapshotFromCron(int $intervalSeconds = 60): void
+    {
+        $intervalSeconds = max(15, $intervalSeconds);
+        $last = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'traffic_snapshot_last_refresh_at')->value('meta_value');
+        if ($last !== '' && strtotime($last) > (time() - $intervalSeconds)) {
+            return;
+        }
+        $this->refreshTrafficSnapshot(true);
+    }
+
+    private function refreshTrafficSnapshot(bool $updateMeta): array
+    {
+        $rows = $this->buildTrafficRowsFromDatabase(500);
+        $this->saveTrafficSnapshotRows($rows);
+        if ($updateMeta) {
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'traffic_snapshot_last_refresh_at'],
+                ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+        }
+        return $rows;
+    }
+
+    private function buildTrafficRowsFromDatabase(int $limit = 500): array
+    {
+        $q = Capsule::table('mod_easydcim_bw_guard_service_state as s')
+            ->join('tblhosting as h', 'h.id', '=', 's.serviceid')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
+            ->whereIn('h.domainstatus', ['Active', 'Suspended'])
+            ->select([
+                's.serviceid',
+                's.userid',
+                'h.packageid as pid',
+                'h.dedicatedip',
+                'h.domain',
+                'c.email',
+                's.easydcim_service_id',
+                's.easydcim_order_id',
+                's.easydcim_server_id',
+                's.last_used_gb',
+                's.last_remaining_gb',
+                's.last_status',
+                's.mode',
+                's.last_check_at',
+                's.cycle_start',
+                's.cycle_end',
+                'c.firstname',
+                'c.lastname',
+            ]);
+        $this->applyScopeFilter($q);
+        $rows = $q->orderByDesc('s.last_check_at')->orderByDesc('s.serviceid')->limit(max(1, $limit))->get();
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        $serviceIds = [];
+        $cycleStarts = [];
+        $cycleEnds = [];
+        foreach ($rows as $r) {
+            $sid = (int) ($r->serviceid ?? 0);
+            if ($sid > 0) {
+                $serviceIds[$sid] = $sid;
+            }
+            $cs = trim((string) ($r->cycle_start ?? ''));
+            $ce = trim((string) ($r->cycle_end ?? ''));
+            if ($cs !== '') {
+                $cycleStarts[$cs] = $cs;
+            }
+            if ($ce !== '') {
+                $cycleEnds[$ce] = $ce;
+            }
+        }
+
+        $purchaseSums = [];
+        if (!empty($serviceIds) && !empty($cycleStarts) && !empty($cycleEnds)) {
+            $pRows = Capsule::table('mod_easydcim_bw_guard_purchases')
+                ->whereIn('whmcs_serviceid', array_values($serviceIds))
+                ->whereIn('cycle_start', array_values($cycleStarts))
+                ->whereIn('cycle_end', array_values($cycleEnds))
+                ->where('payment_status', 'paid')
+                ->select(['whmcs_serviceid', 'cycle_start', 'cycle_end', Capsule::raw('SUM(size_gb) as total_gb')])
+                ->groupBy('whmcs_serviceid', 'cycle_start', 'cycle_end')
+                ->get();
+            foreach ($pRows as $p) {
+                $key = (int) $p->whmcs_serviceid . '|' . (string) $p->cycle_start . '|' . (string) $p->cycle_end;
+                $purchaseSums[$key] = (float) ($p->total_gb ?? 0.0);
+            }
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            $sid = (int) ($r->serviceid ?? 0);
+            $cs = trim((string) ($r->cycle_start ?? ''));
+            $ce = trim((string) ($r->cycle_end ?? ''));
+            $key = $sid . '|' . $cs . '|' . $ce;
+            $out[] = [
+                'serviceid' => $sid,
+                'userid' => (int) ($r->userid ?? 0),
+                'pid' => (int) ($r->pid ?? 0),
+                'dedicatedip' => (string) ($r->dedicatedip ?? ''),
+                'domain' => (string) ($r->domain ?? ''),
+                'email' => (string) ($r->email ?? ''),
+                'easydcim_service_id' => (string) ($r->easydcim_service_id ?? ''),
+                'easydcim_order_id' => (string) ($r->easydcim_order_id ?? ''),
+                'easydcim_server_id' => (string) ($r->easydcim_server_id ?? ''),
+                'last_used_gb' => (float) ($r->last_used_gb ?? 0.0),
+                'last_remaining_gb' => (float) ($r->last_remaining_gb ?? 0.0),
+                'last_status' => (string) ($r->last_status ?? 'ok'),
+                'mode' => (string) ($r->mode ?? 'TOTAL'),
+                'last_check_at' => (string) ($r->last_check_at ?? ''),
+                'cycle_start' => $cs,
+                'cycle_end' => $ce,
+                'firstname' => (string) ($r->firstname ?? ''),
+                'lastname' => (string) ($r->lastname ?? ''),
+                'extra_gb' => (float) ($purchaseSums[$key] ?? 0.0),
+            ];
+        }
+        return $out;
+    }
+
+    private function getTrafficSnapshotPath(): string
+    {
+        return rtrim($this->moduleDir, '/\\') . '/cache/traffic_snapshot.json';
+    }
+
+    private function loadTrafficSnapshotRows(): array
+    {
+        $path = $this->getTrafficSnapshotPath();
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        $rows = $decoded['rows'] ?? [];
+        return is_array($rows) ? $rows : [];
+    }
+
+    private function saveTrafficSnapshotRows(array $rows): void
+    {
+        $path = $this->getTrafficSnapshotPath();
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $payload = [
+            'generated_at' => date('Y-m-d H:i:s'),
+            'count' => count($rows),
+            'rows' => $rows,
+        ];
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return;
+        }
+        $tmp = $path . '.tmp';
+        @file_put_contents($tmp, $json, LOCK_EX);
+        @rename($tmp, $path);
     }
 
     private function formatDefaultPlanBwBadge(?object $default, string $mode): string
@@ -3675,6 +3814,126 @@ final class AdminController
         } catch (\Throwable $e) {
             $this->logger->log('ERROR', 'servers_test_all_background_failed', ['error' => $e->getMessage()]);
         }
+    }
+
+    public function runBackgroundMaintenanceFromCron(int $chunkSize = 5): void
+    {
+        try {
+            $this->refreshTrafficSnapshotFromCron(60);
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'traffic_snapshot_refresh_failed', ['error' => $e->getMessage()]);
+        }
+
+        try {
+            $this->ensureScheduledServerTestQueue();
+            $this->processQueuedServerTestsFromCron(max(1, $chunkSize));
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'servers_maintenance_failed', ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function ensureScheduledServerTestQueue(): void
+    {
+        $state = $this->getTestAllState();
+        if (!empty($state['queue']) && (int) ($state['remaining'] ?? 0) > 0) {
+            return;
+        }
+
+        $now = time();
+        $lastFull = strtotime((string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_last_full_test_at')->value('meta_value'));
+        if (!$lastFull || $lastFull <= ($now - 86400)) {
+            $queue = $this->buildScopedServiceIdQueue();
+            if (!empty($queue)) {
+                $this->saveTestAllState([
+                    'queue' => $queue,
+                    'total' => count($queue),
+                    'done' => 0,
+                    'ok' => 0,
+                    'warn' => 0,
+                    'fail' => 0,
+                    'remaining' => count($queue),
+                    'started_at' => date('Y-m-d H:i:s'),
+                    'source' => 'daily',
+                ]);
+                Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                    ['meta_key' => 'servers_last_full_test_at'],
+                    ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+                );
+            }
+            return;
+        }
+
+        $lastRetry = strtotime((string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_last_retry_test_at')->value('meta_value'));
+        if ($lastRetry && $lastRetry > ($now - 300)) {
+            return;
+        }
+
+        $queue = $this->buildProblemServiceIdQueue();
+        if (empty($queue)) {
+            return;
+        }
+        $this->saveTestAllState([
+            'queue' => $queue,
+            'total' => count($queue),
+            'done' => 0,
+            'ok' => 0,
+            'warn' => 0,
+            'fail' => 0,
+            'remaining' => count($queue),
+            'started_at' => date('Y-m-d H:i:s'),
+            'source' => 'retry',
+        ]);
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'servers_last_retry_test_at'],
+            ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+        );
+    }
+
+    private function buildScopedServiceIdQueue(): array
+    {
+        $services = $this->getScopedHostingServices($this->getEasyServicesCacheOnly(), false, false);
+        $ids = [];
+        foreach ($services as $svc) {
+            $sid = (int) ($svc['serviceid'] ?? 0);
+            if ($sid > 0) {
+                $ids[$sid] = $sid;
+            }
+        }
+        return array_values($ids);
+    }
+
+    private function buildProblemServiceIdQueue(): array
+    {
+        $scoped = $this->buildScopedServiceIdQueue();
+        if (empty($scoped)) {
+            return [];
+        }
+        $scopedSet = array_fill_keys($scoped, true);
+        $rows = Capsule::table('mod_easydcim_bw_guard_meta')
+            ->where('meta_key', 'like', 'service_test_cache_%')
+            ->get(['meta_key', 'meta_value']);
+
+        $queue = [];
+        foreach ($rows as $row) {
+            $key = (string) ($row->meta_key ?? '');
+            if (!preg_match('/^service_test_cache_(\d+)$/', $key, $m)) {
+                continue;
+            }
+            $sid = (int) $m[1];
+            if (!isset($scopedSet[$sid])) {
+                continue;
+            }
+            $payload = json_decode((string) ($row->meta_value ?? ''), true);
+            if (!is_array($payload)) {
+                continue;
+            }
+            $type = strtolower((string) ($payload['type'] ?? ''));
+            $httpCode = (int) ($payload['http_code'] ?? 0);
+            if (in_array($type, ['warning', 'danger'], true) || $httpCode >= 400) {
+                $queue[$sid] = $sid;
+            }
+        }
+        return array_values($queue);
     }
 
     private function testAllServices(?int $chunkOverride = null, bool $allowInitialize = true): array

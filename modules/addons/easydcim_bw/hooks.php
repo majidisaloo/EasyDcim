@@ -45,7 +45,7 @@ add_hook('AfterCronJob', 1, static function (): void {
     );
 
     $lastPoll = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'last_poll_at')->value('meta_value');
-    $interval = max(5, $settings->getInt('poll_interval_minutes', 15));
+    $interval = max(1, $settings->getInt('poll_interval_minutes', 15));
     if (!$lastPoll || strtotime((string) $lastPoll) <= time() - ($interval * 60)) {
         $runner->runPoll();
         Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
@@ -57,7 +57,7 @@ add_hook('AfterCronJob', 1, static function (): void {
     $runner->runUpdateCheck(__DIR__);
 
     try {
-        (new AdminController($settings, new Logger(), __DIR__))->processQueuedServerTestsFromCron(5);
+        (new AdminController($settings, new Logger(), __DIR__))->runBackgroundMaintenanceFromCron(5);
     } catch (\Throwable $e) {
         (new Logger())->log('ERROR', 'servers_test_all_background_hook_failed', ['error' => $e->getMessage()]);
     }

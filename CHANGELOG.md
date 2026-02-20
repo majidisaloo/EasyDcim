@@ -2,6 +2,21 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.97] - 2026-02-20
+### Added
+- Added GitHub update source visibility on dashboard with status card and quick check action.
+- Added advanced log filtering and API fail card click-through for faster troubleshooting.
+- Added stronger search/filter capabilities in Servers view for WHMCS-mapped services.
+- Added daily server test scheduling plus minute-level traffic snapshot caching pipeline.
+- Added configurable server batch chunk size and batch duration statistics.
+- Added pagination controls for logs and servers to improve admin page performance.
+- Added package management actions (edit/delete) in Packages tab.
+
+### Fixed
+- Improved Servers details UX, interface naming, and port state normalization.
+- Disabled fragile servers-tab auto-refresh / auto-continue behavior that caused interruptions.
+- Tightened table/form alignment in Packages and Servers sections for cleaner layout consistency.
+
 ## [1.96] - 2026-02-20
 ### Added
 - `Test All` server queue now continues in background via WHMCS cron even if admin leaves the Servers tab.

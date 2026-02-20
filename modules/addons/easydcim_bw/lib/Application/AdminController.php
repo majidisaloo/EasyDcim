@@ -949,8 +949,9 @@ final class AdminController
                 'focus_serviceid' => (string) ((int) ($svc['serviceid'] ?? 0)),
             ]);
             $serviceUrl = (string) ($svc['service_url'] ?? '#');
-            $serviceCellHtml = '<a class="edbw-service-main-link" href="' . htmlspecialchars($trafficUrl) . '">' . htmlspecialchars($serviceMainLabel) . '</a>'
-                . '<div class="edbw-help"><a href="' . htmlspecialchars($serviceUrl) . '">#' . (int) ($svc['serviceid'] ?? 0) . '</a></div>';
+            $serviceIdText = '#' . (int) ($svc['serviceid'] ?? 0);
+            $serviceCellHtml = '<a class="edbw-service-main-link" href="' . htmlspecialchars($serviceUrl) . '">' . htmlspecialchars($serviceIdText) . '</a>'
+                . '<div class="edbw-help"><a href="' . htmlspecialchars($trafficUrl) . '">' . htmlspecialchars($this->t('tab_traffic')) . '</a></div>';
             echo '<tr>';
             echo '<td>' . $serviceCellHtml . '</td>';
             echo '<td>' . $clientHtml . '</td>';

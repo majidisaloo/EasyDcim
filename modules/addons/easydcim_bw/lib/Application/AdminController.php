@@ -23,6 +23,7 @@ final class AdminController
     private array $orderPortsRuntimeCache = [];
     private array $orderServiceRuntimeCache = [];
     private array $portDetailsRuntimeCache = [];
+    private array $itemLabelRuntimeCache = [];
     private ?bool $orderPortsEndpointSupported = null;
 
     public function __construct(Settings $settings, Logger $logger, string $moduleDir)
@@ -780,6 +781,25 @@ final class AdminController
         $servicesPages = max(1, (int) ceil($servicesTotal / $serversPerPage));
         $assignedPage = min(max(1, $assignedPage), $servicesPages);
         $servicesForPage = array_slice($services, ($assignedPage - 1) * $serversPerPage, $serversPerPage);
+        $resolverClient = null;
+        if ($apiAvailable) {
+            $resolverClient = new EasyDcimClient(
+                $baseUrl,
+                $token,
+                $this->settings->getBool('use_impersonation', false),
+                $this->logger,
+                $this->proxyConfig()
+            );
+        }
+        $defaultsByPid = [];
+        $pidList = array_values(array_unique(array_filter(array_map(static fn (array $row): int => (int) ($row['pid'] ?? 0), $servicesForPage))));
+        if (!empty($pidList)) {
+            $defaultsByPid = Capsule::table('mod_easydcim_bw_guard_product_defaults')
+                ->whereIn('pid', $pidList)
+                ->get()
+                ->keyBy('pid')
+                ->all();
+        }
         $unassignedTotal = count($unassigned);
         $unassignedPages = max(1, (int) ceil($unassignedTotal / $serversPerPage));
         $unassignedPage = min(max(1, $unassignedPage), $unassignedPages);
@@ -800,6 +820,7 @@ final class AdminController
                 : $this->t('m_no_data');
             $portLabels = [];
             $switchLabels = [];
+            $switchIds = [];
             $speedLabels = [];
             if (is_array($testCache) && isset($testCache['port_rows']) && is_array($testCache['port_rows'])) {
                 foreach ($testCache['port_rows'] as $row) {
@@ -808,13 +829,35 @@ final class AdminController
                     }
                     $cp = trim((string) ($row['connected_port_label'] ?? ''));
                     $ci = trim((string) ($row['connected_item_label'] ?? ''));
+                    $cpid = trim((string) ($row['connected_port_id'] ?? ''));
+                    $ciid = trim((string) ($row['connected_item_id'] ?? ''));
                     $sp = trim((string) ($row['speed'] ?? ''));
+                    if (($cp === '' || $this->isSimpleNumericLabel($cp)) && $cpid !== '' && $resolverClient instanceof EasyDcimClient) {
+                        $detail = $this->getPortDetailCached($resolverClient, $cpid);
+                        $fromDetail = trim((string) ($detail['label'] ?? ''));
+                        if ($fromDetail !== '') {
+                            $cp = $fromDetail;
+                        }
+                    }
+                    $cp = $this->normalizePortPresentationLabel($cp);
                     $normalizedSwitch = $this->normalizeSwitchDisplayLabel($ci);
+                    if ($normalizedSwitch === '' && $ciid !== '' && $resolverClient instanceof EasyDcimClient) {
+                        $resolvedSwitch = $this->resolveItemLabelCached($resolverClient, $ciid);
+                        if ($resolvedSwitch !== '') {
+                            $normalizedSwitch = $resolvedSwitch;
+                        }
+                    }
+                    if ($normalizedSwitch === '' && $ciid !== '') {
+                        $normalizedSwitch = 'SW #' . $ciid;
+                    }
                     if ($cp !== '' && !in_array($cp, $portLabels, true)) {
                         $portLabels[] = $cp;
                     }
                     if ($normalizedSwitch !== '' && !in_array($normalizedSwitch, $switchLabels, true)) {
                         $switchLabels[] = $normalizedSwitch;
+                    }
+                    if ($ciid !== '' && !in_array($ciid, $switchIds, true)) {
+                        $switchIds[] = $ciid;
                     }
                     if ($sp !== '' && !in_array($sp, $speedLabels, true)) {
                         $speedLabels[] = $sp;
@@ -822,7 +865,13 @@ final class AdminController
                 }
             }
             $portLabelText = !empty($portLabels) ? implode(' | ', array_slice($portLabels, 0, 3)) : $this->t('m_no_data');
-            $switchLabelText = !empty($switchLabels) ? implode(' | ', array_slice($switchLabels, 0, 3)) : $this->t('m_no_data');
+            if (!empty($switchLabels)) {
+                $switchLabelText = implode(' | ', array_slice($switchLabels, 0, 3));
+            } elseif (!empty($switchIds)) {
+                $switchLabelText = implode(' | ', array_map(static fn (string $id): string => 'SW #' . $id, array_slice($switchIds, 0, 3)));
+            } else {
+                $switchLabelText = $this->t('m_no_data');
+            }
             $speedLabelText = !empty($speedLabels) ? implode(' | ', array_slice($speedLabels, 0, 3)) : $this->t('m_no_data');
             $clientHtml = '<a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a>';
             $domain = trim((string) ($svc['domain'] ?? ''));
@@ -841,15 +890,25 @@ final class AdminController
                 $easyItem = $easyByIp[$svcIp];
             }
             $publicIp = trim((string) ($svc['ip'] ?? ''));
+            $easyIp = trim((string) ($easyItem['ip'] ?? ''));
             $iloIp = trim((string) ($easyItem['ilo_ip'] ?? ''));
             $labelText = trim((string) ($easyItem['label'] ?? ''));
+            $easyHost = trim((string) ($easyItem['hostname'] ?? ''));
+            $productId = (int) ($svc['pid'] ?? 0);
+            $productName = trim((string) ($svc['product_name'] ?? ''));
+            if ($productName === '') {
+                $productName = 'PID ' . $productId;
+            }
+            $mode = strtoupper(trim((string) ($svc['mode'] ?? $this->settings->getString('default_calculation_mode', 'TOTAL'))));
+            $defaultPlanHtml = $this->formatDefaultPlanBwBadge($defaultsByPid[$productId] ?? null, $mode);
+            $defaultPlanText = trim(strip_tags($defaultPlanHtml));
             if ($switchLabelText === $this->t('m_no_data')) {
                 $fallbackSwitch = $this->normalizeSwitchDisplayLabel($labelText);
                 if ($fallbackSwitch !== '') {
                     $switchLabelText = $fallbackSwitch;
                 }
             }
-            $serviceMainLabel = $labelText;
+            $serviceMainLabel = $switchLabelText !== $this->t('m_no_data') ? $switchLabelText : $labelText;
             if ($serviceMainLabel === '') {
                 $serviceMainLabel = $domain;
             }
@@ -857,8 +916,13 @@ final class AdminController
                 $serviceMainLabel = '#' . (int) ($svc['serviceid'] ?? 0);
             }
             $detailRows = [
-                [$this->t('product_id'), (string) ((int) ($svc['pid'] ?? 0))],
-                ['IP', trim((string) ($svc['ip'] ?? '')) !== '' ? (string) $svc['ip'] : '-'],
+                [$this->t('product'), $productName],
+                [$this->t('default_plan_bw'), $defaultPlanText !== '' ? $defaultPlanText : '-'],
+                ['WHMCS IP', $publicIp !== '' ? $publicIp : '-'],
+                ['EasyDCIM IP', $easyIp !== '' ? $easyIp : '-'],
+                ['iLO IP', $iloIp !== '' ? $iloIp : '-'],
+                ['WHMCS Hostname', $domain !== '' ? $domain : '-'],
+                ['EasyDCIM Hostname', $easyHost !== '' ? $easyHost : '-'],
                 [$this->t('connected_switches'), $switchLabelText],
                 [$this->t('connected_ports'), $portLabelText],
                 [$this->t('port_speeds'), $speedLabelText],
@@ -873,10 +937,6 @@ final class AdminController
             }
             if ($iloIp !== '' && strcasecmp($iloIp, $publicIp) !== 0) {
                 $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">iLO</span><span>' . htmlspecialchars($iloIp) . '</span></div>';
-            }
-            if ($iloIp !== '') {
-                // Keep iLO in detail drawer even when same as public IP.
-                $detailRows[] = ['iLO IP', $iloIp];
             }
             if ($labelText !== '') {
                 $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">Label</span><span>' . htmlspecialchars($labelText) . '</span></div>';
@@ -3546,8 +3606,10 @@ final class AdminController
             ->select([
                 'h.id as serviceid', 'h.userid', 'h.packageid as pid', 'h.domainstatus', 'h.dedicatedip',
                 'h.domain',
+                'p.name as product_name',
                 'c.firstname', 'c.lastname', 'c.email',
                 's.easydcim_service_id as state_service_id',
+                's.mode',
                 's.last_used_gb', 's.last_remaining_gb', 's.last_check_at', 's.cycle_start', 's.cycle_end',
             ]);
         $this->applyScopeFilter($q);
@@ -3758,6 +3820,7 @@ final class AdminController
                 'serviceid' => $sid,
                 'userid' => (int) $r->userid,
                 'pid' => (int) $r->pid,
+                'product_name' => (string) ($r->product_name ?? ''),
                 'domainstatus' => (string) ($r->domainstatus ?? ''),
                 'domain' => (string) ($r->domain ?? ''),
             'firstname' => (string) ($r->firstname ?? ''),
@@ -3777,6 +3840,7 @@ final class AdminController
                 'network_ports_total' => $networkPortsTotal,
                 'network_ports_up' => $networkPortsUp,
                 'network_traffic_total' => $networkTrafficTotal,
+                'mode' => (string) ($r->mode ?? ''),
                 'last_used_gb' => (float) ($r->last_used_gb ?? 0.0),
                 'last_remaining_gb' => (float) ($r->last_remaining_gb ?? 0.0),
                 'last_check_at' => (string) ($r->last_check_at ?? ''),
@@ -4368,6 +4432,7 @@ final class AdminController
             $related = isset($row['related']) && is_array($row['related']) ? $row['related'] : [];
             $relatedId = (string) ($row['related_id'] ?? $row['server_id'] ?? $row['device_id'] ?? $row['item_id'] ?? '');
             $label = $this->extractPreferredLabel($row);
+            $hostname = $this->extractPreferredHostname($row);
             $iloIp = $this->extractManagementIp($row);
             $ip = (string) ($row['ip'] ?? $row['dedicated_ip'] ?? $row['ipv4'] ?? '');
             if ($ip === '' && isset($related['ip_addresses']) && is_array($related['ip_addresses'])) {
@@ -4404,6 +4469,7 @@ final class AdminController
                 'ip' => $ip,
                 'ilo_ip' => $iloIp,
                 'label' => $label,
+                'hostname' => $hostname,
                 'status' => (string) ($row['status'] ?? $row['state'] ?? ''),
                 'client_name' => $identity['name'],
                 'client_email' => $identity['email'],
@@ -4510,6 +4576,28 @@ final class AdminController
                 continue;
             }
             foreach (['label', 'name', 'hostname', 'title'] as $k) {
+                $v = trim((string) ($row[$node][$k] ?? ''));
+                if ($v !== '') {
+                    return $v;
+                }
+            }
+        }
+        return '';
+    }
+
+    private function extractPreferredHostname(array $row): string
+    {
+        foreach (['hostname', 'host_name', 'fqdn', 'domain', 'server_hostname'] as $k) {
+            $v = trim((string) ($row[$k] ?? ''));
+            if ($v !== '') {
+                return $v;
+            }
+        }
+        foreach (['related', 'service', 'order', 'item', 'server'] as $node) {
+            if (!isset($row[$node]) || !is_array($row[$node])) {
+                continue;
+            }
+            foreach (['hostname', 'host_name', 'fqdn', 'domain', 'server_hostname'] as $k) {
                 $v = trim((string) ($row[$node][$k] ?? ''));
                 if ($v !== '') {
                     return $v;
@@ -5810,6 +5898,9 @@ final class AdminController
 
         $label = trim((string) ($data['name'] ?? $data['label'] ?? $data['user_label'] ?? $data['description'] ?? $data['number'] ?? ''));
         if ($label === '') {
+            $label = $this->extractPortLikeLabelFromRow($data);
+        }
+        if ($label === '') {
             $label = '#' . $portId;
         }
         $stateRaw = strtolower(trim((string) ($data['status'] ?? $data['state'] ?? $data['admin_state'] ?? $data['oper_state'] ?? '')));
@@ -5827,6 +5918,41 @@ final class AdminController
             'speed' => $speed,
             'traffic_total' => $this->extractTrafficTotal($data),
         ];
+    }
+
+    private function resolveItemLabelCached(EasyDcimClient $client, string $itemId): string
+    {
+        $itemId = trim($itemId);
+        if ($itemId === '') {
+            return '';
+        }
+        if (array_key_exists($itemId, $this->itemLabelRuntimeCache)) {
+            return (string) $this->itemLabelRuntimeCache[$itemId];
+        }
+
+        try {
+            $response = $client->serverDetailsById($itemId);
+            $code = (int) ($response['http_code'] ?? 0);
+            if ($code < 200 || $code >= 300) {
+                $this->itemLabelRuntimeCache[$itemId] = '';
+                return '';
+            }
+            $payload = $this->extractApiDataPayload($response);
+            $label = $this->extractPreferredLabel($payload);
+            if ($label === '') {
+                $label = trim((string) ($payload['name'] ?? $payload['hostname'] ?? $payload['title'] ?? ''));
+            }
+            $label = $this->normalizeSwitchDisplayLabel($label);
+            $this->itemLabelRuntimeCache[$itemId] = $label;
+            return $label;
+        } catch (\Throwable $e) {
+            $this->logger->log('WARNING', 'resolve_item_label_failed', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+            $this->itemLabelRuntimeCache[$itemId] = '';
+            return '';
+        }
     }
 
     private function isNetworkPortCandidate(string $name, string $description, string $type): bool

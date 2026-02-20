@@ -680,7 +680,7 @@ final class AdminController
             $runningNow = ((int) ($testAllState['remaining'] ?? 0) > 0)
                 || ((int) ($testAllState['total'] ?? 0) > (int) ($testAllState['done'] ?? 0));
             if ($runningNow) {
-                echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-continue-form">';
+                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
                 echo '<input type="hidden" name="tab" value="servers">';
                 echo '<input type="hidden" name="action" value="test_all_services">';
                 echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
@@ -713,18 +713,6 @@ final class AdminController
                     . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')'
                     . ' | ' . htmlspecialchars($this->t('servers_test_all_elapsed')) . ': ' . htmlspecialchars($this->formatDuration($elapsedSeconds));
                 echo '</div>';
-                $autoUrl = $this->buildServersAutoContinueUrl();
-                if ($autoUrl !== '') {
-                    echo '<meta http-equiv="refresh" content="2;url=' . htmlspecialchars($autoUrl) . '">';
-                }
-                echo '<script>(function(){'
-                    . 'if(window.edbwBatchAutoRunning){return;}'
-                    . 'window.edbwBatchAutoRunning=true;'
-                    . 'setTimeout(function(){'
-                    . 'var form=document.getElementById("edbw-continue-form");'
-                    . 'if(form){form.submit();}'
-                    . '},1200);'
-                    . '})();</script>';
             }
             $lastDuration = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_test_all_last_duration_seconds')->value('meta_value');
             $lastFinishedAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_test_all_last_finished_at')->value('meta_value');
@@ -936,28 +924,6 @@ final class AdminController
             }
             return true;
         }));
-    }
-
-    private function buildServersAutoContinueUrl(): string
-    {
-        $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
-        if ($uri === '') {
-            return '';
-        }
-        $parts = parse_url($uri);
-        $path = (string) ($parts['path'] ?? '');
-        if ($path === '') {
-            return '';
-        }
-        $query = [];
-        if (!empty($parts['query'])) {
-            parse_str((string) $parts['query'], $query);
-        }
-        unset($query['ajax'], $query['api'], $query['op']);
-        $query['tab'] = 'servers';
-        $query['action'] = 'test_all_services';
-        $query['auto'] = '1';
-        return $path . '?' . http_build_query($query);
     }
 
     private function buildTabUrl(string $tab, array $extra = []): string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EasyDcimBandwidthGuard\Application;
 
 use EasyDcimBandwidthGuard\Config\Settings;
+use EasyDcimBandwidthGuard\Domain\CycleCalculator;
 use EasyDcimBandwidthGuard\Infrastructure\EasyDcimClient;
 use EasyDcimBandwidthGuard\Infrastructure\Git\GitUpdateManager;
 use EasyDcimBandwidthGuard\Support\Crypto;
@@ -25,6 +26,7 @@ final class AdminController
     private array $portDetailsRuntimeCache = [];
     private array $itemLabelRuntimeCache = [];
     private ?bool $orderPortsEndpointSupported = null;
+    private ?array $trafficHistoryMapCache = null;
 
     public function __construct(Settings $settings, Logger $logger, string $moduleDir)
     {
@@ -1454,6 +1456,7 @@ final class AdminController
                 $defaultsByPid[(int) $dr->pid] = $dr;
             }
         }
+        $historyByService = $this->loadTrafficHistoryMap();
 
         $easyServices = $this->getEasyServicesCacheOnly();
         $easyByService = [];
@@ -1543,20 +1546,59 @@ final class AdminController
             if ($clientName === '') {
                 $clientName = '#' . $userId;
             }
-            $mode = strtoupper(trim((string) ($r['mode'] ?? 'TOTAL')));
+            $defaultMode = strtoupper(trim((string) (($defaultsByPid[$pid]->default_mode ?? '') ?: '')));
+            $mode = $defaultMode !== '' ? $defaultMode : strtoupper(trim((string) ($r['mode'] ?? 'TOTAL')));
+            if (!in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
+                $mode = strtoupper($this->settings->getString('default_calculation_mode', 'TOTAL'));
+                if (!in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
+                    $mode = 'TOTAL';
+                }
+            }
             $cycleStart = trim((string) ($r['cycle_start'] ?? ''));
             $cycleEnd = trim((string) ($r['cycle_end'] ?? ''));
             $extra = (float) ($r['extra_gb'] ?? 0.0);
+            if ($cycleStart === '' || $cycleEnd === '') {
+                $nextDueDate = trim((string) ($r['nextduedate'] ?? ''));
+                $billingCycle = trim((string) ($r['billingcycle'] ?? ''));
+                if ($nextDueDate !== '' && $billingCycle !== '') {
+                    try {
+                        $calculated = (new CycleCalculator())->calculate($nextDueDate, $billingCycle);
+                        if ($cycleStart === '') {
+                            $cycleStart = (string) ($calculated['start'] ?? '');
+                        }
+                        if ($cycleEnd === '') {
+                            $cycleEnd = (string) ($calculated['end'] ?? '');
+                        }
+                    } catch (\Throwable $e) {
+                    }
+                }
+            }
             $cycle = $cycleStart !== '' && $cycleEnd !== ''
                 ? ($cycleStart . ' -> ' . $cycleEnd)
                 : $this->t('m_no_data');
             $status = $this->domainStatusLabel((string) ($r['last_status'] ?? ''));
             $checkedAt = trim((string) ($r['last_check_at'] ?? ''));
             if ($checkedAt === '') {
-                $checkedAt = $this->t('m_no_data');
+                $checkedAt = trim((string) ($r['snapshot_generated_at'] ?? ''));
+                if ($checkedAt === '') {
+                    $checkedAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'traffic_snapshot_last_refresh_at')->value('meta_value');
+                }
+                if ($checkedAt === '') {
+                    $checkedAt = $this->t('m_no_data');
+                }
             }
             $defaultPlanHtml = $this->formatDefaultPlanBwBadge($defaultsByPid[$pid] ?? null, $mode);
             $resetAt = $cycleEnd !== '' ? (date('Y-m-d H:i:s', strtotime($cycleEnd) + 1)) : $this->t('m_no_data');
+            $historyRaw = $historyByService[$serviceId] ?? [];
+            $historySeries = $this->prepareTrafficHistorySeries($historyRaw, $cycleStart, $cycleEnd);
+            if (($used <= 0.0 && $remaining <= 0.0) && !empty($historySeries['all'])) {
+                $latestPoint = $historySeries['all'][count($historySeries['all']) - 1];
+                $used = (float) ($latestPoint['used'] ?? 0.0);
+                $remaining = (float) ($latestPoint['remaining'] ?? 0.0);
+                $allowed = max(0.0, (float) ($latestPoint['allowed'] ?? ($used + $remaining)));
+            }
+            $historyJson = htmlspecialchars(json_encode($historySeries, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8');
+            $detailId = 'edbw-traffic-detail-' . $serviceId;
 
             $trClass = $focusServiceId > 0 && $focusServiceId === $serviceId ? ' class="edbw-row-focus"' : '';
             echo '<tr' . $trClass . '>';
@@ -1569,7 +1611,8 @@ final class AdminController
             echo '<td>' . htmlspecialchars($cycle) . '</td>';
             echo '<td>' . htmlspecialchars($status) . '</td>';
             echo '<td>' . htmlspecialchars($checkedAt) . '</td>';
-            echo '<td><details class="edbw-traffic-detail"><summary>' . htmlspecialchars($this->t('details')) . '</summary>'
+            echo '<td><button type="button" class="btn btn-default edbw-traffic-detail-open" data-target="' . htmlspecialchars($detailId) . '">' . htmlspecialchars($this->t('details')) . '</button>'
+                . '<div id="' . htmlspecialchars($detailId) . '" class="edbw-traffic-detail-panel" hidden>'
                 . '<div class="edbw-traffic-detail-body">'
                 . '<div><strong>' . htmlspecialchars($this->t('product_id')) . ':</strong> ' . $pid . '</div>'
                 . '<div><strong>IP:</strong> ' . htmlspecialchars((string) ($r['dedicatedip'] ?? '-')) . '</div>'
@@ -1579,7 +1622,20 @@ final class AdminController
                 . '<div><strong>' . htmlspecialchars($this->t('traffic_allowed_gb')) . ':</strong> ' . number_format($allowed, 2, '.', '') . ' GB</div>'
                 . '<div><strong>' . htmlspecialchars($this->t('traffic_cycle')) . ':</strong> ' . htmlspecialchars($cycle) . '</div>'
                 . '<div><strong>' . htmlspecialchars($this->t('reset_at')) . ':</strong> ' . htmlspecialchars($resetAt) . '</div>'
-                . '</div></details></td>';
+                . '</div>'
+                . '<div class="edbw-traffic-chart-box" data-edbw-history="' . $historyJson . '">'
+                . '<div class="edbw-traffic-chart-actions">'
+                . '<button type="button" data-range="24h" class="btn btn-default btn-xs">24h</button>'
+                . '<button type="button" data-range="7d" class="btn btn-default btn-xs">7d</button>'
+                . '<button type="button" data-range="cycle" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('traffic_cycle')) . '</button>'
+                . '<label>' . htmlspecialchars($this->t('from')) . ' <input type="date" class="edbw-range-from"></label>'
+                . '<label>' . htmlspecialchars($this->t('to')) . ' <input type="date" class="edbw-range-to"></label>'
+                . '<button type="button" data-range="custom" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('apply')) . '</button>'
+                . '</div>'
+                . '<svg class="edbw-traffic-svg" viewBox="0 0 620 180" preserveAspectRatio="none"><path class="edbw-line-used" d=""></path><path class="edbw-line-allowed" d=""></path></svg>'
+                . '<div class="edbw-traffic-chart-meta"></div>'
+                . '</div>'
+                . '</div></td>';
             echo '</tr>';
         }
 
@@ -1589,6 +1645,17 @@ final class AdminController
 
         echo '</tbody></table></div>';
         echo '</div>';
+        $noChartDataText = $this->t('no_chart_data');
+        echo '<script>(function(){'
+            . 'function qsa(s,p){return Array.prototype.slice.call((p||document).querySelectorAll(s));}'
+            . 'function fmt(n){return (Math.round((Number(n)||0)*100)/100).toFixed(2);}'
+            . 'function toTs(v){var d=new Date(v);return isNaN(d.getTime())?0:d.getTime();}'
+            . 'function pathFor(points,width,height,maxV,key){if(!points.length||maxV<=0){return"";}var step=points.length>1?(width/(points.length-1)):width;var d="";for(var i=0;i<points.length;i++){var x=i*step;var y=height-((Number(points[i][key])||0)/maxV)*(height-10)-5;d+=(i===0?"M":"L")+x.toFixed(2)+" "+y.toFixed(2)+" ";}return d.trim();}'
+            . 'function rangePoints(series,range,from,to){var all=Array.isArray(series.all)?series.all:[];if(range==="24h"){return Array.isArray(series.h24)?series.h24:[];}if(range==="7d"){return Array.isArray(series.d7)?series.d7:[];}if(range==="cycle"){return Array.isArray(series.cycle)?series.cycle:[];}if(range==="custom"){var s=toTs(from),e=toTs(to);if(!s||!e||e<s){return [];}e=e+86400000-1000;return all.filter(function(p){var t=toTs(p.at||"");return t>=s&&t<=e;});}return all;}'
+            . 'function renderChart(box,range,from,to){var raw=box.getAttribute("data-edbw-history")||"{}";var series={};try{series=JSON.parse(raw)||{};}catch(e){series={};}var pts=rangePoints(series,range,from,to);var svg=box.querySelector(".edbw-traffic-svg");var meta=box.querySelector(".edbw-traffic-chart-meta");if(!svg||!meta){return;}var used=svg.querySelector(".edbw-line-used");var allowed=svg.querySelector(".edbw-line-allowed");if(!pts.length){if(used){used.setAttribute("d","");}if(allowed){allowed.setAttribute("d","");}meta.textContent=' . json_encode($noChartDataText, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';return;}var maxV=0;pts.forEach(function(p){maxV=Math.max(maxV,Number(p.used)||0,Number(p.allowed)||0);});if(maxV<=0){maxV=1;}if(used){used.setAttribute("d",pathFor(pts,620,180,maxV,"used"));}if(allowed){allowed.setAttribute("d",pathFor(pts,620,180,maxV,"allowed"));}var latest=pts[pts.length-1]||{};meta.textContent="Points: "+pts.length+" | Used: "+fmt(latest.used)+" GB | Allowed: "+fmt(latest.allowed)+" GB";}'
+            . 'qsa(".edbw-traffic-detail-open").forEach(function(btn){btn.addEventListener("click",function(){var id=btn.getAttribute("data-target");if(!id){return;}var panel=document.getElementById(id);if(!panel){return;}var open=panel.hasAttribute("hidden");qsa(".edbw-traffic-detail-panel").forEach(function(p){p.setAttribute("hidden","hidden");});if(!open){panel.setAttribute("hidden","hidden");return;}panel.removeAttribute("hidden");var box=panel.querySelector(".edbw-traffic-chart-box");if(box){renderChart(box,"cycle","","");}});});'
+            . 'qsa(".edbw-traffic-chart-box").forEach(function(box){qsa("button[data-range]",box).forEach(function(b){b.addEventListener("click",function(){var r=b.getAttribute("data-range")||"cycle";var from=(box.querySelector(".edbw-range-from")||{}).value||"";var to=(box.querySelector(".edbw-range-to")||{}).value||"";renderChart(box,r,from,to);});});});'
+            . '})();</script>';
     }
 
     public function refreshTrafficSnapshotFromCron(int $intervalSeconds = 60): void
@@ -1604,7 +1671,9 @@ final class AdminController
     private function refreshTrafficSnapshot(bool $updateMeta): array
     {
         $rows = $this->buildTrafficRowsFromDatabase(500);
+        $rows = $this->appendSnapshotGeneratedAt($rows);
         $this->saveTrafficSnapshotRows($rows);
+        $this->recordTrafficHistoryRows($rows);
         if ($updateMeta) {
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
                 ['meta_key' => 'traffic_snapshot_last_refresh_at'],
@@ -1627,6 +1696,8 @@ final class AdminController
                 'h.packageid as pid',
                 'h.dedicatedip',
                 'h.domain',
+                'h.nextduedate',
+                'h.billingcycle',
                 'c.email',
                 's.easydcim_service_id',
                 's.easydcim_order_id',
@@ -1693,6 +1764,8 @@ final class AdminController
                 'pid' => (int) ($r->pid ?? 0),
                 'dedicatedip' => (string) ($r->dedicatedip ?? ''),
                 'domain' => (string) ($r->domain ?? ''),
+                'nextduedate' => (string) ($r->nextduedate ?? ''),
+                'billingcycle' => (string) ($r->billingcycle ?? ''),
                 'email' => (string) ($r->email ?? ''),
                 'easydcim_service_id' => (string) ($r->easydcim_service_id ?? ''),
                 'easydcim_order_id' => (string) ($r->easydcim_order_id ?? ''),
@@ -1735,6 +1808,20 @@ final class AdminController
         return is_array($rows) ? $rows : [];
     }
 
+    private function appendSnapshotGeneratedAt(array $rows): array
+    {
+        $generatedAt = date('Y-m-d H:i:s');
+        foreach ($rows as $i => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if (trim((string) ($row['snapshot_generated_at'] ?? '')) === '') {
+                $rows[$i]['snapshot_generated_at'] = $generatedAt;
+            }
+        }
+        return $rows;
+    }
+
     private function saveTrafficSnapshotRows(array $rows): void
     {
         $path = $this->getTrafficSnapshotPath();
@@ -1759,16 +1846,176 @@ final class AdminController
     private function formatDefaultPlanBwBadge(?object $default, string $mode): string
     {
         $mode = strtoupper($mode);
+        if (!in_array($mode, ['IN', 'OUT', 'TOTAL'], true)) {
+            $mode = 'TOTAL';
+        }
         $in = $this->defaultPlanPart($default, 'in');
         $out = $this->defaultPlanPart($default, 'out');
         $total = $this->defaultPlanPart($default, 'total');
-        $inClass = $mode === 'IN' || $mode === 'TOTAL' ? 'is-active' : '';
-        $outClass = $mode === 'OUT' || $mode === 'TOTAL' ? 'is-active' : '';
-        $totalClass = $mode === 'TOTAL' ? 'is-active' : '';
+        $inClass = $mode === 'IN' ? 'is-counted' : 'is-free';
+        $outClass = $mode === 'OUT' ? 'is-counted' : 'is-free';
+        $totalClass = $mode === 'TOTAL' ? 'is-counted' : 'is-free';
 
         return '<span class="edbw-plan-bw"><span class="' . $inClass . '">' . htmlspecialchars($in) . '-D</span>'
             . ' | <span class="' . $outClass . '">' . htmlspecialchars($out) . '-U</span>'
             . ' | <span class="' . $totalClass . '">' . htmlspecialchars($total) . '-T</span></span>';
+    }
+
+    private function loadTrafficHistoryMap(): array
+    {
+        if (is_array($this->trafficHistoryMapCache)) {
+            return $this->trafficHistoryMapCache;
+        }
+        $path = rtrim($this->moduleDir, '/\\') . '/cache/traffic_history.json';
+        if (!is_file($path)) {
+            $this->trafficHistoryMapCache = [];
+            return [];
+        }
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            $this->trafficHistoryMapCache = [];
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            $this->trafficHistoryMapCache = [];
+            return [];
+        }
+        $map = $decoded['services'] ?? [];
+        $this->trafficHistoryMapCache = is_array($map) ? $map : [];
+        return $this->trafficHistoryMapCache;
+    }
+
+    private function recordTrafficHistoryRows(array $rows): void
+    {
+        $path = rtrim($this->moduleDir, '/\\') . '/cache/traffic_history.json';
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $history = $this->loadTrafficHistoryMap();
+        $cutoff = time() - (86400 * 90);
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $serviceId = (int) ($row['serviceid'] ?? 0);
+            if ($serviceId <= 0) {
+                continue;
+            }
+            $at = trim((string) (($row['last_check_at'] ?? '') ?: ($row['snapshot_generated_at'] ?? date('Y-m-d H:i:s'))));
+            $ts = strtotime($at);
+            if (!$ts) {
+                $at = date('Y-m-d H:i:s');
+                $ts = time();
+            }
+            if ($ts < $cutoff) {
+                continue;
+            }
+            $used = (float) ($row['last_used_gb'] ?? 0.0);
+            $remaining = (float) ($row['last_remaining_gb'] ?? 0.0);
+            $allowed = max(0.0, $used + $remaining);
+            $key = (string) $serviceId;
+            if (!isset($history[$key]) || !is_array($history[$key])) {
+                $history[$key] = [];
+            }
+            $last = end($history[$key]);
+            if (!is_array($last) || (string) ($last['at'] ?? '') !== $at) {
+                $history[$key][] = [
+                    'at' => $at,
+                    'used' => round($used, 4),
+                    'remaining' => round($remaining, 4),
+                    'allowed' => round($allowed, 4),
+                    'status' => (string) ($row['last_status'] ?? 'ok'),
+                ];
+            } else {
+                $idx = array_key_last($history[$key]);
+                if ($idx !== null) {
+                    $history[$key][$idx] = [
+                        'at' => $at,
+                        'used' => round($used, 4),
+                        'remaining' => round($remaining, 4),
+                        'allowed' => round($allowed, 4),
+                        'status' => (string) ($row['last_status'] ?? 'ok'),
+                    ];
+                }
+            }
+            if (count($history[$key]) > 1000) {
+                $history[$key] = array_slice($history[$key], -1000);
+            }
+        }
+        foreach ($history as $sid => $points) {
+            if (!is_array($points)) {
+                unset($history[$sid]);
+                continue;
+            }
+            $history[$sid] = array_values(array_filter($points, static function ($p) use ($cutoff): bool {
+                if (!is_array($p)) {
+                    return false;
+                }
+                $ts = strtotime((string) ($p['at'] ?? ''));
+                return $ts && $ts >= $cutoff;
+            }));
+        }
+        $payload = json_encode([
+            'generated_at' => date('Y-m-d H:i:s'),
+            'services' => $history,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($payload !== false) {
+            $tmp = $path . '.tmp';
+            @file_put_contents($tmp, $payload, LOCK_EX);
+            @rename($tmp, $path);
+        }
+        $this->trafficHistoryMapCache = $history;
+    }
+
+    private function prepareTrafficHistorySeries(array $points, string $cycleStart, string $cycleEnd): array
+    {
+        $norm = [];
+        foreach ($points as $p) {
+            if (!is_array($p)) {
+                continue;
+            }
+            $at = trim((string) ($p['at'] ?? ''));
+            $ts = strtotime($at);
+            if (!$ts) {
+                continue;
+            }
+            $norm[] = [
+                'at' => date('Y-m-d H:i:s', $ts),
+                'used' => (float) ($p['used'] ?? 0.0),
+                'remaining' => (float) ($p['remaining'] ?? 0.0),
+                'allowed' => (float) ($p['allowed'] ?? 0.0),
+            ];
+        }
+        usort($norm, static fn (array $a, array $b): int => strcmp((string) $a['at'], (string) $b['at']));
+        $now = time();
+        $h24 = [];
+        $d7 = [];
+        $cycle = [];
+        $cycleStartTs = strtotime($cycleStart);
+        $cycleEndTs = strtotime($cycleEnd);
+        foreach ($norm as $p) {
+            $ts = strtotime((string) $p['at']);
+            if (!$ts) {
+                continue;
+            }
+            if ($ts >= ($now - 86400)) {
+                $h24[] = $p;
+            }
+            if ($ts >= ($now - 86400 * 7)) {
+                $d7[] = $p;
+            }
+            if ($cycleStartTs && $cycleEndTs && $ts >= $cycleStartTs && $ts <= $cycleEndTs) {
+                $cycle[] = $p;
+            }
+        }
+        return [
+            'all' => $norm,
+            'h24' => $h24,
+            'd7' => $d7,
+            'cycle' => $cycle,
+        ];
     }
 
     private function defaultPlanPart(?object $default, string $part): string
@@ -6121,6 +6368,10 @@ final class AdminController
             'search' => 'جستجو',
             'clear_search' => 'پاک کردن',
             'rows_per_page' => 'تعداد در صفحه',
+            'from' => 'از',
+            'to' => 'تا',
+            'apply' => 'اعمال',
+            'no_chart_data' => 'داده‌ای برای نمودار وجود ندارد',
             'pager_prev' => 'قبلی',
             'pager_next' => 'بعدی',
             'pager_page' => 'صفحه',
@@ -6363,6 +6614,10 @@ final class AdminController
             'search' => 'Search',
             'clear_search' => 'Clear',
             'rows_per_page' => 'Rows per page',
+            'from' => 'From',
+            'to' => 'To',
+            'apply' => 'Apply',
+            'no_chart_data' => 'No chart data',
             'pager_prev' => 'Prev',
             'pager_next' => 'Next',
             'pager_page' => 'Page',

@@ -145,7 +145,15 @@ final class AdminController
             $flash[] = ['type' => 'warning', 'text' => 'Git shell update is disabled. Use Release update actions.'];
         }
         if ($action === 'add_package') {
-            $this->addPackage();
+            $flash[] = $this->addPackage();
+            $tab = 'packages';
+        }
+        if ($action === 'update_package') {
+            $flash[] = $this->updatePackage();
+            $tab = 'packages';
+        }
+        if ($action === 'delete_package') {
+            $flash[] = $this->deletePackage();
             $tab = 'packages';
         }
         if ($action === 'save_override') {
@@ -459,19 +467,31 @@ final class AdminController
 
     private function renderPackagesTab(): void
     {
+        $editPackageId = (int) ($_GET['edit_pkg'] ?? 0);
+        $editPackage = null;
+        if ($editPackageId > 0) {
+            $editPackage = Capsule::table('mod_easydcim_bw_guard_packages')->where('id', $editPackageId)->first();
+        }
         echo '<div class="edbw-panel">';
         echo '<h3>Traffic Packages</h3>';
         echo '<form method="post" class="edbw-form-inline edbw-packages-form">';
         echo '<input type="hidden" name="tab" value="packages">';
-        echo '<input type="hidden" name="action" value="add_package">';
-        echo '<div class="edbw-packages-field"><label>Package name</label><input type="text" name="pkg_name" placeholder="Package name" required></div>';
-        echo '<div class="edbw-packages-field"><label>Size GB</label><input type="number" step="0.01" min="0.01" name="pkg_size_gb" placeholder="Size GB" required></div>';
-        echo '<div class="edbw-packages-field"><label>Price</label><input type="number" step="0.01" min="0" name="pkg_price" placeholder="Price" required></div>';
-        echo '<div class="edbw-packages-action"><button class="btn btn-default" type="submit">Add Package</button></div>';
+        echo '<input type="hidden" name="action" value="' . ($editPackage ? 'update_package' : 'add_package') . '">';
+        if ($editPackage) {
+            echo '<input type="hidden" name="pkg_id" value="' . (int) $editPackage->id . '">';
+        }
+        echo '<div class="edbw-packages-field"><label>Package name</label><input type="text" name="pkg_name" placeholder="Package name" value="' . htmlspecialchars((string) ($editPackage->name ?? '')) . '" required></div>';
+        echo '<div class="edbw-packages-field"><label>Size GB</label><input type="number" step="0.01" min="0.01" name="pkg_size_gb" placeholder="Size GB" value="' . htmlspecialchars((string) ($editPackage->size_gb ?? '')) . '" required></div>';
+        echo '<div class="edbw-packages-field"><label>Price</label><input type="number" step="0.01" min="0" name="pkg_price" placeholder="Price" value="' . htmlspecialchars((string) ($editPackage->price ?? '')) . '" required></div>';
+        echo '<div class="edbw-packages-field"><label>Active</label><select name="pkg_active"><option value="1"' . (((int) ($editPackage->is_active ?? 1)) === 1 ? ' selected' : '') . '>Yes</option><option value="0"' . (((int) ($editPackage->is_active ?? 1)) === 0 ? ' selected' : '') . '>No</option></select></div>';
+        echo '<div class="edbw-packages-action"><button class="btn btn-default" type="submit">' . ($editPackage ? 'Save Package' : 'Add Package') . '</button></div>';
+        if ($editPackage) {
+            echo '<div class="edbw-packages-action"><a class="btn btn-default" href="' . htmlspecialchars($this->buildTabUrl('packages')) . '">Cancel Edit</a></div>';
+        }
         echo '</form>';
         $packages = Capsule::table('mod_easydcim_bw_guard_packages')->orderBy('id')->limit(100)->get();
         echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped edbw-table-center edbw-packages-table"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th></tr></thead><tbody>';
+        echo '<table class="table table-striped edbw-table-center edbw-packages-table"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th><th>Action</th></tr></thead><tbody>';
         foreach ($packages as $pkg) {
             echo '<tr>';
             echo '<td>' . (int) $pkg->id . '</td>';
@@ -479,6 +499,15 @@ final class AdminController
             echo '<td>' . htmlspecialchars((string) $pkg->size_gb) . '</td>';
             echo '<td>' . htmlspecialchars((string) $pkg->price) . '</td>';
             echo '<td>' . ((int) $pkg->is_active === 1 ? 'Yes' : 'No') . '</td>';
+            echo '<td><div class="edbw-packages-actions">';
+            echo '<a class="btn btn-default btn-xs" href="' . htmlspecialchars($this->buildTabUrl('packages', ['edit_pkg' => (string) ((int) $pkg->id)])) . '">Edit</a>';
+            echo '<form method="post" class="edbw-test-form" onsubmit="return confirm(\'Delete this package?\')">';
+            echo '<input type="hidden" name="tab" value="packages">';
+            echo '<input type="hidden" name="action" value="delete_package">';
+            echo '<input type="hidden" name="delete_pkg_id" value="' . (int) $pkg->id . '">';
+            echo '<button type="submit" class="btn btn-danger btn-xs">Delete</button>';
+            echo '</form>';
+            echo '</div></td>';
             echo '</tr>';
         }
         echo '</tbody></table>';
@@ -3260,14 +3289,14 @@ final class AdminController
         ];
     }
 
-    private function addPackage(): void
+    private function addPackage(): array
     {
         $name = trim((string) ($_POST['pkg_name'] ?? ''));
         $size = (float) ($_POST['pkg_size_gb'] ?? 0);
         $price = (float) ($_POST['pkg_price'] ?? 0);
+        $active = ((string) ($_POST['pkg_active'] ?? '1')) === '1' ? 1 : 0;
         if ($name === '' || $size <= 0 || $price < 0) {
-            echo '<div class="alert alert-danger">Invalid package values.</div>';
-            return;
+            return ['type' => 'danger', 'text' => 'Invalid package values.'];
         }
 
         Capsule::table('mod_easydcim_bw_guard_packages')->insert([
@@ -3277,11 +3306,49 @@ final class AdminController
             'taxed' => 1,
             'available_for_pids' => null,
             'available_for_gids' => null,
-            'is_active' => 1,
+            'is_active' => $active,
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
-        echo '<div class="alert alert-success">Package added.</div>';
+        return ['type' => 'success', 'text' => 'Package added.'];
+    }
+
+    private function updatePackage(): array
+    {
+        $id = (int) ($_POST['pkg_id'] ?? 0);
+        $name = trim((string) ($_POST['pkg_name'] ?? ''));
+        $size = (float) ($_POST['pkg_size_gb'] ?? 0);
+        $price = (float) ($_POST['pkg_price'] ?? 0);
+        $active = ((string) ($_POST['pkg_active'] ?? '1')) === '1' ? 1 : 0;
+        if ($id <= 0 || $name === '' || $size <= 0 || $price < 0) {
+            return ['type' => 'danger', 'text' => 'Invalid package values.'];
+        }
+
+        $exists = Capsule::table('mod_easydcim_bw_guard_packages')->where('id', $id)->exists();
+        if (!$exists) {
+            return ['type' => 'warning', 'text' => 'Package not found.'];
+        }
+        Capsule::table('mod_easydcim_bw_guard_packages')->where('id', $id)->update([
+            'name' => $name,
+            'size_gb' => $size,
+            'price' => $price,
+            'is_active' => $active,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        return ['type' => 'success', 'text' => 'Package updated.'];
+    }
+
+    private function deletePackage(): array
+    {
+        $id = (int) ($_POST['delete_pkg_id'] ?? 0);
+        if ($id <= 0) {
+            return ['type' => 'danger', 'text' => 'Invalid package id.'];
+        }
+        $deleted = (int) Capsule::table('mod_easydcim_bw_guard_packages')->where('id', $id)->delete();
+        if ($deleted < 1) {
+            return ['type' => 'warning', 'text' => 'Package not found.'];
+        }
+        return ['type' => 'success', 'text' => 'Package deleted.'];
     }
 
     private function saveOverride(): void

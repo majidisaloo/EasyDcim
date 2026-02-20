@@ -373,6 +373,13 @@
   align-items: flex-end;
 }
 
+.edbw-packages-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
 .edbw-packages-table {
   table-layout: auto;
 }

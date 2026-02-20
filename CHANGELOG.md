@@ -2,6 +2,11 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [2.01] - 2026-02-20
+### Fixed
+- Restored release pipeline consistency by aligning version metadata across `VERSION`, root README, module README, and changelog.
+- Prepared a valid tag/release pair so GitHub Releases can be published again and updater can detect new versions.
+
 ## [1.98] - 2026-02-20
 ### Changed
 - Servers tab now shows service-focused names instead of raw IDs:

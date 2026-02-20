@@ -80,6 +80,21 @@
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
 }
 
+.edbw-card-link {
+  text-decoration: none !important;
+  color: inherit !important;
+  display: block;
+}
+
+.edbw-card-link .edbw-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.edbw-card-link:hover .edbw-card {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
 .edbw-card-icon {
   width: 36px;
   height: 36px;

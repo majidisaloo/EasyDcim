@@ -323,7 +323,8 @@ final class AdminController
         $this->renderMetricCard($this->t('m_version'), (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
         $this->renderMetricCard($this->t('m_commit'), (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
         $this->renderMetricCard($this->t('m_update_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
-        $this->renderMetricCard($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>');
+        $apiFailUrl = $this->buildTabUrl('logs', ['logs_only_errors' => '1', 'logs_level' => 'ERROR']);
+        $this->renderMetricCardLink($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>', $apiFailUrl);
         $this->renderMetricCard($this->t('m_update_lock'), $updateLock ? $this->t('m_locked') : $this->t('m_free'), $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
         $this->renderMetricCard($this->t('m_connection'), $connectionState['text'], $connectionState['state'], '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
 
@@ -373,6 +374,13 @@ final class AdminController
         echo '<div class="edbw-card-value">' . htmlspecialchars($value) . '</div>';
         echo '</div>';
         echo '</div>';
+    }
+
+    private function renderMetricCardLink(string $title, string $value, string $state, string $iconSvg, string $url): void
+    {
+        echo '<a class="edbw-card-link" href="' . htmlspecialchars($url) . '">';
+        $this->renderMetricCard($title, $value, $state, $iconSvg);
+        echo '</a>';
     }
 
     private function renderSettingsTab(): void
@@ -1150,9 +1158,32 @@ final class AdminController
     private function renderLogsTab(): void
     {
         $retention = max(1, $this->settings->getInt('log_retention_days', 30));
+        $logsQ = trim((string) ($_REQUEST['logs_q'] ?? ''));
+        $logsSource = trim((string) ($_REQUEST['logs_source'] ?? ''));
+        $logsLevel = strtoupper(trim((string) ($_REQUEST['logs_level'] ?? '')));
+        $logsOnlyErrors = ((string) ($_REQUEST['logs_only_errors'] ?? '') === '1');
         echo '<div class="edbw-panel">';
         echo '<h3>System Logs</h3>';
         echo '<p class="edbw-help">Retention is set to ' . $retention . ' day(s). Logs older than this are auto-cleaned in cron.</p>';
+        echo '<form method="get" class="edbw-form-inline edbw-search-form" action="' . htmlspecialchars($this->buildTabUrl('logs', ['logs_q' => '', 'logs_source' => '', 'logs_level' => '', 'logs_only_errors' => ''])) . '">';
+        echo '<label>' . htmlspecialchars($this->t('search')) . '</label>';
+        echo '<input type="text" name="logs_q" value="' . htmlspecialchars($logsQ) . '" placeholder="' . htmlspecialchars($this->t('logs_search_placeholder')) . '">';
+        echo '<label>Level</label>';
+        echo '<select name="logs_level">';
+        echo '<option value=""' . ($logsLevel === '' ? ' selected' : '') . '>All</option>';
+        foreach (['INFO', 'WARNING', 'ERROR'] as $lv) {
+            echo '<option value="' . $lv . '"' . ($logsLevel === $lv ? ' selected' : '') . '>' . $lv . '</option>';
+        }
+        echo '</select>';
+        echo '<label>Source</label>';
+        echo '<input type="text" name="logs_source" value="' . htmlspecialchars($logsSource) . '" placeholder="system / easydcim_api_call ...">';
+        echo '<label>' . htmlspecialchars($this->t('logs_only_errors')) . '</label>';
+        echo '<input type="checkbox" name="logs_only_errors" value="1"' . ($logsOnlyErrors ? ' checked' : '') . '>';
+        echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('search')) . '</button>';
+        if ($logsQ !== '' || $logsSource !== '' || $logsLevel !== '' || $logsOnlyErrors) {
+            echo '<a class="btn btn-default" href="' . htmlspecialchars($this->buildTabUrl('logs', ['logs_q' => '', 'logs_source' => '', 'logs_level' => '', 'logs_only_errors' => ''])) . '">' . htmlspecialchars($this->t('clear_search')) . '</a>';
+        }
+        echo '</form>';
         echo '<div class="edbw-server-actions">';
         echo '<form method="post" class="edbw-form-inline edbw-action-card">';
         echo '<input type="hidden" name="tab" value="logs">';
@@ -1166,7 +1197,12 @@ final class AdminController
         echo '</form>';
         echo '</div>';
 
-        $logs = $this->getSystemLogs(500);
+        $logs = $this->getSystemLogs(500, [
+            'q' => $logsQ,
+            'source' => $logsSource,
+            'level' => $logsLevel,
+            'only_errors' => $logsOnlyErrors,
+        ]);
         echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>Level</th><th>Message</th><th>Source</th><th>Details</th><th>Time</th></tr></thead><tbody>';
         foreach ($logs as $log) {
@@ -2869,10 +2905,42 @@ final class AdminController
             ->all();
     }
 
-    private function getSystemLogs(int $limit = 400): array
+    private function getSystemLogs(int $limit = 400, array $filters = []): array
     {
-        return Capsule::table('mod_easydcim_bw_guard_logs')
-            ->orderByDesc('id')
+        $qText = trim((string) ($filters['q'] ?? ''));
+        $source = trim((string) ($filters['source'] ?? ''));
+        $level = strtoupper(trim((string) ($filters['level'] ?? '')));
+        $onlyErrors = !empty($filters['only_errors']);
+
+        $query = Capsule::table('mod_easydcim_bw_guard_logs');
+
+        if ($onlyErrors) {
+            $query->where(function ($sub): void {
+                $sub->where('level', 'ERROR')
+                    ->orWhere('level', 'WARNING');
+            });
+        }
+
+        if (in_array($level, ['INFO', 'WARNING', 'ERROR'], true)) {
+            $query->where('level', $level);
+        }
+
+        if ($source !== '') {
+            $query->where('source', 'LIKE', '%' . $source . '%');
+        }
+
+        if ($qText !== '') {
+            $like = '%' . $qText . '%';
+            $query->where(function ($sub) use ($like): void {
+                $sub->where('message', 'LIKE', $like)
+                    ->orWhere('source', 'LIKE', $like)
+                    ->orWhere('context_json', 'LIKE', $like)
+                    ->orWhere('level', 'LIKE', $like)
+                    ->orWhere('created_at', 'LIKE', $like);
+            });
+        }
+
+        return $query->orderByDesc('id')
             ->limit($limit)
             ->get()
             ->map(static fn ($r): array => (array) $r)
@@ -5304,6 +5372,8 @@ final class AdminController
             'clear_search' => 'پاک کردن',
             'servers_search_placeholder' => 'جستجو: IP, iLO, Label/MDP, نام، ایمیل، Service/Order/Server ID',
             'traffic_search_placeholder' => 'جستجو: IP, iLO, Label/MDP, نام، ایمیل، Service/Order/Server ID',
+            'logs_search_placeholder' => 'جستجو در پیام/سورس/جزئیات JSON/تاریخ/شناسه سرویس',
+            'logs_only_errors' => 'فقط خطا/هشدار',
             'test' => 'تست',
             'mode' => 'روش',
             'invalid_service' => 'شناسه سرویس نامعتبر است.',
@@ -5532,6 +5602,8 @@ final class AdminController
             'clear_search' => 'Clear',
             'servers_search_placeholder' => 'Search by IP, iLO, Label/MDP, name, email, Service/Order/Server ID',
             'traffic_search_placeholder' => 'Search by IP, iLO, Label/MDP, name, email, Service/Order/Server ID',
+            'logs_search_placeholder' => 'Search message/source/JSON details/date/service id',
+            'logs_only_errors' => 'Only Errors/Warnings',
             'test' => 'Test',
             'mode' => 'Mode',
             'invalid_service' => 'Invalid service id.',

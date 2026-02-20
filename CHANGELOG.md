@@ -2,6 +2,21 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.93] - 2026-02-20
+### Fixed
+- Servers batch test now auto-continues reliably without requiring manual `Continue` clicks:
+  - added server-side auto-refresh fallback while queue is running
+  - kept existing form-based continue flow for CSP/theme compatibility.
+- Improved port-state detection by considering numeric status values from nested `selected/connected` refs, reducing false/unstable status indicators.
+- Improved `Unassigned Services` filtering so non-final statuses (such as pending/rejected) remain visible for reconciliation workflows; only final terminal states are excluded.
+### Added
+- Added per-port traffic badge in Servers port status rows for quick visibility of traffic volume on detected ports.
+- Added richer row details in Servers table:
+  - connected switch/item summary
+  - connected port labels
+  - detected link speed summary
+- Added domain/label hint under client name in assigned-services rows for easier visual identification.
+
 ## [1.92] - 2026-02-20
 ### Changed
 - Servers tab is now bandwidth-first:

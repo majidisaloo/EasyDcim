@@ -583,7 +583,7 @@ final class AdminController
             $runningNow = ((int) ($testAllState['remaining'] ?? 0) > 0)
                 || ((int) ($testAllState['total'] ?? 0) > (int) ($testAllState['done'] ?? 0));
             if ($runningNow) {
-                echo '<form method="post" class="edbw-form-inline edbw-action-card">';
+                echo '<form method="post" class="edbw-form-inline edbw-action-card" id="edbw-continue-form">';
                 echo '<input type="hidden" name="tab" value="servers">';
                 echo '<input type="hidden" name="action" value="test_all_services">';
                 echo '<button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('servers_test_all_continue')) . '</button>';
@@ -614,6 +614,14 @@ final class AdminController
                     . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
                     . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')';
                 echo '</div>';
+                echo '<script>(function(){'
+                    . 'if(window.edbwBatchAutoRunning){return;}'
+                    . 'window.edbwBatchAutoRunning=true;'
+                    . 'setTimeout(function(){'
+                    . 'var form=document.getElementById("edbw-continue-form");'
+                    . 'if(form){form.submit();}'
+                    . '},1200);'
+                    . '})();</script>';
             }
             if (count($easyServices) === 0 && $cacheAt === '') {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
@@ -642,15 +650,48 @@ final class AdminController
             $cycleText = ($cycleStart !== '' && $cycleEnd !== '')
                 ? ($cycleStart . ' -> ' . $cycleEnd)
                 : $this->t('m_no_data');
+            $portLabels = [];
+            $switchLabels = [];
+            $speedLabels = [];
+            if (is_array($testCache) && isset($testCache['port_rows']) && is_array($testCache['port_rows'])) {
+                foreach ($testCache['port_rows'] as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $cp = trim((string) ($row['connected_port_label'] ?? ''));
+                    $ci = trim((string) ($row['connected_item_label'] ?? ''));
+                    $sp = trim((string) ($row['speed'] ?? ''));
+                    if ($cp !== '' && !in_array($cp, $portLabels, true)) {
+                        $portLabels[] = $cp;
+                    }
+                    if ($ci !== '' && !in_array($ci, $switchLabels, true)) {
+                        $switchLabels[] = $ci;
+                    }
+                    if ($sp !== '' && !in_array($sp, $speedLabels, true)) {
+                        $speedLabels[] = $sp;
+                    }
+                }
+            }
+            $portLabelText = !empty($portLabels) ? implode(' | ', array_slice($portLabels, 0, 3)) : $this->t('m_no_data');
+            $switchLabelText = !empty($switchLabels) ? implode(' | ', array_slice($switchLabels, 0, 3)) : $this->t('m_no_data');
+            $speedLabelText = !empty($speedLabels) ? implode(' | ', array_slice($speedLabels, 0, 3)) : $this->t('m_no_data');
             $detailRows = [
                 [$this->t('product_id'), (string) ((int) ($svc['pid'] ?? 0))],
                 ['IP', trim((string) ($svc['ip'] ?? '')) !== '' ? (string) $svc['ip'] : '-'],
                 [$this->t('order_id'), trim((string) ($svc['easydcim_order_id'] ?? '')) !== '' ? (string) $svc['easydcim_order_id'] : '-'],
                 ['EasyDCIM Service', trim((string) ($svc['easydcim_service_id'] ?? '')) !== '' ? (string) $svc['easydcim_service_id'] : '-'],
                 ['EasyDCIM Server', trim((string) ($svc['easydcim_server_id'] ?? '')) !== '' ? (string) $svc['easydcim_server_id'] : '-'],
+                [$this->t('connected_switches'), $switchLabelText],
+                [$this->t('connected_ports'), $portLabelText],
+                [$this->t('port_speeds'), $speedLabelText],
                 [$this->t('traffic_cycle'), $cycleText],
                 [$this->t('traffic_last_check'), $lastCheck !== '' ? $lastCheck : $this->t('m_no_data')],
             ];
+            $clientHtml = '<a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a>';
+            $domain = trim((string) ($svc['domain'] ?? ''));
+            if ($domain !== '') {
+                $clientHtml .= '<div class="edbw-help">' . htmlspecialchars($domain) . '</div>';
+            }
             $detailHtml = '<details class="edbw-detail-toggle"><summary>' . htmlspecialchars($this->t('details')) . '</summary><dl class="edbw-detail-list">';
             foreach ($detailRows as [$label, $value]) {
                 $detailHtml .= '<dt>' . htmlspecialchars((string) $label) . '</dt><dd>' . htmlspecialchars((string) $value) . '</dd>';
@@ -658,7 +699,7 @@ final class AdminController
             $detailHtml .= '</dl></details>';
             echo '<tr>';
             echo '<td><a href="' . htmlspecialchars((string) $svc['service_url']) . '">#' . (int) $svc['serviceid'] . '</a></td>';
-            echo '<td><a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a></td>';
+            echo '<td>' . $clientHtml . '</td>';
             echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($usedText) . '</span></td>';
             echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($remainingText) . '</span></td>';
             echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($allowedText) . '</span></td>';
@@ -721,10 +762,7 @@ final class AdminController
             if ($serviceId !== '' && isset($explicitMappedServiceIds[$serviceId])) {
                 return false;
             }
-            if ($serverId === '' && $ip === '' && $iloIp === '' && $label === '') {
-                return false;
-            }
-            if (in_array($status, ['pending', 'rejected', 'cancelled', 'canceled', 'fraud'], true)) {
+            if (in_array($status, ['cancelled', 'canceled', 'fraud', 'terminated'], true)) {
                 return false;
             }
             return true;
@@ -2842,6 +2880,7 @@ final class AdminController
                 'userid' => (int) $r->userid,
                 'pid' => (int) $r->pid,
                 'domainstatus' => (string) ($r->domainstatus ?? ''),
+                'domain' => (string) ($r->domain ?? ''),
             'firstname' => (string) ($r->firstname ?? ''),
             'lastname' => (string) ($r->lastname ?? ''),
             'email' => (string) ($r->email ?? ''),
@@ -3733,14 +3772,30 @@ final class AdminController
             $state = 'up';
         }
         if ($state === 'unknown') {
-            $numericStatus = $row['status'] ?? $row['admin_state'] ?? $row['oper_state'] ?? null;
-            if (is_numeric($numericStatus)) {
+            $numericCandidates = [
+                $row['status'] ?? null,
+                $row['admin_state'] ?? null,
+                $row['oper_state'] ?? null,
+                $selectedPort['state'] ?? null,
+                $connectedPort['state'] ?? null,
+                $connectedItem['state'] ?? null,
+            ];
+            $sawNegative = false;
+            foreach ($numericCandidates as $numericStatus) {
+                if (!is_numeric($numericStatus)) {
+                    continue;
+                }
                 $statusInt = (int) $numericStatus;
                 if ($statusInt > 0) {
                     $state = 'up';
-                } elseif ($statusInt === 0) {
-                    $state = 'down';
+                    break;
                 }
+                if ($statusInt < 0) {
+                    $sawNegative = true;
+                }
+            }
+            if ($state === 'unknown' && $sawNegative) {
+                $state = 'down';
             }
         }
 
@@ -4790,6 +4845,9 @@ final class AdminController
             'traffic_allowed_gb' => 'سقف موثر (GB)',
             'traffic_cycle' => 'بازه سیکل',
             'traffic_last_check' => 'آخرین بررسی',
+            'connected_switches' => 'سوییچ/آیتم متصل',
+            'connected_ports' => 'پورت‌های متصل',
+            'port_speeds' => 'سرعت لینک',
             'status' => 'وضعیت',
             'no_rows' => 'موردی یافت نشد',
             'order_id' => 'Order ID',
@@ -5007,6 +5065,9 @@ final class AdminController
             'traffic_allowed_gb' => 'Effective Allowed (GB)',
             'traffic_cycle' => 'Cycle Window',
             'traffic_last_check' => 'Last Check',
+            'connected_switches' => 'Connected switch/item',
+            'connected_ports' => 'Connected ports',
+            'port_speeds' => 'Link speed',
             'status' => 'Status',
             'no_rows' => 'No rows found',
             'order_id' => 'Order ID',

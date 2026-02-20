@@ -614,6 +614,10 @@ final class AdminController
                     . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
                     . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')';
                 echo '</div>';
+                $autoUrl = $this->buildServersAutoContinueUrl();
+                if ($autoUrl !== '') {
+                    echo '<meta http-equiv="refresh" content="2;url=' . htmlspecialchars($autoUrl) . '">';
+                }
                 echo '<script>(function(){'
                     . 'if(window.edbwBatchAutoRunning){return;}'
                     . 'window.edbwBatchAutoRunning=true;'
@@ -767,6 +771,28 @@ final class AdminController
             }
             return true;
         }));
+    }
+
+    private function buildServersAutoContinueUrl(): string
+    {
+        $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+        if ($uri === '') {
+            return '';
+        }
+        $parts = parse_url($uri);
+        $path = (string) ($parts['path'] ?? '');
+        if ($path === '') {
+            return '';
+        }
+        $query = [];
+        if (!empty($parts['query'])) {
+            parse_str((string) $parts['query'], $query);
+        }
+        unset($query['ajax'], $query['api'], $query['op']);
+        $query['tab'] = 'servers';
+        $query['action'] = 'test_all_services';
+        $query['auto'] = '1';
+        return $path . '?' . http_build_query($query);
     }
 
     private function getExplicitMappedEasyServiceIdsForScope(): array
@@ -3036,7 +3062,7 @@ final class AdminController
             if (function_exists('set_time_limit')) {
                 @set_time_limit(60);
             }
-            $chunkSize = 5;
+            $chunkSize = 1;
             $state = $this->getTestAllState();
             $queue = $state['queue'];
 
@@ -4279,8 +4305,10 @@ final class AdminController
                 }
                 $name = $this->resolvePortDisplayName($r);
                 $speed = trim((string) ($r['speed'] ?? ''));
+                $traffic = $this->formatPortTraffic((float) ($r['traffic_total'] ?? 0.0));
                 $speedHtml = $speed !== '' ? '<span class="edbw-port-speed">' . htmlspecialchars($speed) . '</span>' : '';
-                $lines[] = '<div class="edbw-port-line"><span class="edbw-dot ' . $stateClass . '"></span><span class="edbw-port-name">' . htmlspecialchars($name) . '</span>' . $speedHtml . '<span class="edbw-port-state">(' . htmlspecialchars($stateText) . ')</span></div>';
+                $trafficHtml = $traffic !== '' ? '<span class="edbw-port-traffic">' . htmlspecialchars($traffic) . '</span>' : '';
+                $lines[] = '<div class="edbw-port-line"><span class="edbw-dot ' . $stateClass . '"></span><span class="edbw-port-name">' . htmlspecialchars($name) . '</span>' . $speedHtml . $trafficHtml . '<span class="edbw-port-state">(' . htmlspecialchars($stateText) . ')</span></div>';
             }
         }
 
@@ -4289,6 +4317,20 @@ final class AdminController
             $html .= '<div class="edbw-port-list">' . implode('', $lines) . '</div>';
         }
         return $html;
+    }
+
+    private function formatPortTraffic(float $value): string
+    {
+        if ($value <= 0) {
+            return '';
+        }
+        $units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        $i = 0;
+        while ($value >= 1024 && $i < count($units) - 1) {
+            $value /= 1024;
+            $i++;
+        }
+        return number_format($value, $value >= 100 ? 0 : 2, '.', '') . ' ' . $units[$i];
     }
 
     private function resolvePortDisplayName(array $row): string

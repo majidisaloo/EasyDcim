@@ -1611,9 +1611,9 @@ final class AdminController
             echo '<td>' . htmlspecialchars($cycle) . '</td>';
             echo '<td>' . htmlspecialchars($status) . '</td>';
             echo '<td>' . htmlspecialchars($checkedAt) . '</td>';
-            echo '<td><button type="button" class="btn btn-default edbw-traffic-detail-open" data-target="' . htmlspecialchars($detailId) . '">' . htmlspecialchars($this->t('details')) . '</button>'
-                . '<div id="' . htmlspecialchars($detailId) . '" class="edbw-traffic-detail-panel" hidden>'
-                . '<div class="edbw-traffic-detail-body">'
+            echo '<td><button type="button" class="btn btn-sm btn-outline-primary edbw-traffic-detail-open" data-target="' . htmlspecialchars($detailId) . '">' . htmlspecialchars($this->t('details')) . '</button>'
+                . '<div id="' . htmlspecialchars($detailId) . '" class="card mt-2" hidden>'
+                . '<div class="card-body p-2 small">'
                 . '<div><strong>' . htmlspecialchars($this->t('product_id')) . ':</strong> ' . $pid . '</div>'
                 . '<div><strong>IP:</strong> ' . htmlspecialchars((string) ($r['dedicatedip'] ?? '-')) . '</div>'
                 . '<div><strong>' . htmlspecialchars($this->t('mode')) . ':</strong> ' . htmlspecialchars($mode) . '</div>'
@@ -1623,17 +1623,17 @@ final class AdminController
                 . '<div><strong>' . htmlspecialchars($this->t('traffic_cycle')) . ':</strong> ' . htmlspecialchars($cycle) . '</div>'
                 . '<div><strong>' . htmlspecialchars($this->t('reset_at')) . ':</strong> ' . htmlspecialchars($resetAt) . '</div>'
                 . '</div>'
-                . '<div class="edbw-traffic-chart-box" data-edbw-history="' . $historyJson . '">'
-                . '<div class="edbw-traffic-chart-actions">'
-                . '<button type="button" data-range="24h" class="btn btn-default btn-xs">24h</button>'
-                . '<button type="button" data-range="7d" class="btn btn-default btn-xs">7d</button>'
-                . '<button type="button" data-range="cycle" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('traffic_cycle')) . '</button>'
-                . '<label>' . htmlspecialchars($this->t('from')) . ' <input type="date" class="edbw-range-from"></label>'
-                . '<label>' . htmlspecialchars($this->t('to')) . ' <input type="date" class="edbw-range-to"></label>'
-                . '<button type="button" data-range="custom" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('apply')) . '</button>'
+                . '<div class="mt-2 pt-2 border-top" data-edbw-history="' . $historyJson . '">'
+                . '<div class="d-flex flex-wrap align-items-center mb-2">'
+                . '<button type="button" data-range="24h" class="btn btn-sm btn-outline-secondary mr-1 mb-1">24h</button>'
+                . '<button type="button" data-range="7d" class="btn btn-sm btn-outline-secondary mr-1 mb-1">7d</button>'
+                . '<button type="button" data-range="cycle" class="btn btn-sm btn-outline-secondary mr-1 mb-1">' . htmlspecialchars($this->t('traffic_cycle')) . '</button>'
+                . '<label class="mb-1 mr-1">' . htmlspecialchars($this->t('from')) . ' <input type="date" class="form-control form-control-sm d-inline-block w-auto edbw-range-from"></label>'
+                . '<label class="mb-1 mr-1">' . htmlspecialchars($this->t('to')) . ' <input type="date" class="form-control form-control-sm d-inline-block w-auto edbw-range-to"></label>'
+                . '<button type="button" data-range="custom" class="btn btn-sm btn-outline-primary mb-1">' . htmlspecialchars($this->t('apply')) . '</button>'
                 . '</div>'
-                . '<svg class="edbw-traffic-svg" viewBox="0 0 620 180" preserveAspectRatio="none"><path class="edbw-line-used" d=""></path><path class="edbw-line-allowed" d=""></path></svg>'
-                . '<div class="edbw-traffic-chart-meta"></div>'
+                . '<svg class="w-100 border rounded" style="height:170px;" viewBox="0 0 620 180" preserveAspectRatio="none"><path class="edbw-line-used" d="" stroke="#dc3545" stroke-width="2" fill="none"></path><path class="edbw-line-allowed" d="" stroke="#28a745" stroke-width="2" fill="none"></path></svg>'
+                . '<div class="small text-muted mt-1 edbw-traffic-chart-meta"></div>'
                 . '</div>'
                 . '</div></td>';
             echo '</tr>';
@@ -1652,9 +1652,9 @@ final class AdminController
             . 'function toTs(v){var d=new Date(v);return isNaN(d.getTime())?0:d.getTime();}'
             . 'function pathFor(points,width,height,maxV,key){if(!points.length||maxV<=0){return"";}var step=points.length>1?(width/(points.length-1)):width;var d="";for(var i=0;i<points.length;i++){var x=i*step;var y=height-((Number(points[i][key])||0)/maxV)*(height-10)-5;d+=(i===0?"M":"L")+x.toFixed(2)+" "+y.toFixed(2)+" ";}return d.trim();}'
             . 'function rangePoints(series,range,from,to){var all=Array.isArray(series.all)?series.all:[];if(range==="24h"){return Array.isArray(series.h24)?series.h24:[];}if(range==="7d"){return Array.isArray(series.d7)?series.d7:[];}if(range==="cycle"){return Array.isArray(series.cycle)?series.cycle:[];}if(range==="custom"){var s=toTs(from),e=toTs(to);if(!s||!e||e<s){return [];}e=e+86400000-1000;return all.filter(function(p){var t=toTs(p.at||"");return t>=s&&t<=e;});}return all;}'
-            . 'function renderChart(box,range,from,to){var raw=box.getAttribute("data-edbw-history")||"{}";var series={};try{series=JSON.parse(raw)||{};}catch(e){series={};}var pts=rangePoints(series,range,from,to);var svg=box.querySelector(".edbw-traffic-svg");var meta=box.querySelector(".edbw-traffic-chart-meta");if(!svg||!meta){return;}var used=svg.querySelector(".edbw-line-used");var allowed=svg.querySelector(".edbw-line-allowed");if(!pts.length){if(used){used.setAttribute("d","");}if(allowed){allowed.setAttribute("d","");}meta.textContent=' . json_encode($noChartDataText, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';return;}var maxV=0;pts.forEach(function(p){maxV=Math.max(maxV,Number(p.used)||0,Number(p.allowed)||0);});if(maxV<=0){maxV=1;}if(used){used.setAttribute("d",pathFor(pts,620,180,maxV,"used"));}if(allowed){allowed.setAttribute("d",pathFor(pts,620,180,maxV,"allowed"));}var latest=pts[pts.length-1]||{};meta.textContent="Points: "+pts.length+" | Used: "+fmt(latest.used)+" GB | Allowed: "+fmt(latest.allowed)+" GB";}'
-            . 'qsa(".edbw-traffic-detail-open").forEach(function(btn){btn.addEventListener("click",function(){var id=btn.getAttribute("data-target");if(!id){return;}var panel=document.getElementById(id);if(!panel){return;}var open=panel.hasAttribute("hidden");qsa(".edbw-traffic-detail-panel").forEach(function(p){p.setAttribute("hidden","hidden");});if(!open){panel.setAttribute("hidden","hidden");return;}panel.removeAttribute("hidden");var box=panel.querySelector(".edbw-traffic-chart-box");if(box){renderChart(box,"cycle","","");}});});'
-            . 'qsa(".edbw-traffic-chart-box").forEach(function(box){qsa("button[data-range]",box).forEach(function(b){b.addEventListener("click",function(){var r=b.getAttribute("data-range")||"cycle";var from=(box.querySelector(".edbw-range-from")||{}).value||"";var to=(box.querySelector(".edbw-range-to")||{}).value||"";renderChart(box,r,from,to);});});});'
+            . 'function renderChart(box,range,from,to){var raw=box.getAttribute("data-edbw-history")||"{}";var series={};try{series=JSON.parse(raw)||{};}catch(e){series={};}var pts=rangePoints(series,range,from,to);var svg=box.querySelector("svg");var meta=box.querySelector(".edbw-traffic-chart-meta");if(!svg||!meta){return;}var used=svg.querySelector(".edbw-line-used");var allowed=svg.querySelector(".edbw-line-allowed");if(!pts.length){if(used){used.setAttribute("d","");}if(allowed){allowed.setAttribute("d","");}meta.textContent=' . json_encode($noChartDataText, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';return;}var maxV=0;pts.forEach(function(p){maxV=Math.max(maxV,Number(p.used)||0,Number(p.allowed)||0);});if(maxV<=0){maxV=1;}if(used){used.setAttribute("d",pathFor(pts,620,180,maxV,"used"));}if(allowed){allowed.setAttribute("d",pathFor(pts,620,180,maxV,"allowed"));}var latest=pts[pts.length-1]||{};meta.textContent="Points: "+pts.length+" | Used: "+fmt(latest.used)+" GB | Allowed: "+fmt(latest.allowed)+" GB";}'
+            . 'qsa(".edbw-traffic-detail-open").forEach(function(btn){btn.addEventListener("click",function(){var id=btn.getAttribute("data-target");if(!id){return;}var panel=document.getElementById(id);if(!panel){return;}var open=panel.hasAttribute("hidden");qsa(".card[id^=\'edbw-traffic-detail-\']").forEach(function(p){p.setAttribute("hidden","hidden");});if(!open){panel.setAttribute("hidden","hidden");return;}panel.removeAttribute("hidden");var box=panel.querySelector("[data-edbw-history]");if(box){renderChart(box,"cycle","","");}});});'
+            . 'qsa(".card[id^=\'edbw-traffic-detail-\']").forEach(function(panel){qsa("button[data-range]",panel).forEach(function(b){b.addEventListener("click",function(){var r=b.getAttribute("data-range")||"cycle";var box=panel.querySelector("[data-edbw-history]");if(!box){return;}var from=(panel.querySelector(".edbw-range-from")||{}).value||"";var to=(panel.querySelector(".edbw-range-to")||{}).value||"";renderChart(box,r,from,to);});});});'
             . '})();</script>';
     }
 
@@ -1852,11 +1852,11 @@ final class AdminController
         $in = $this->defaultPlanPart($default, 'in');
         $out = $this->defaultPlanPart($default, 'out');
         $total = $this->defaultPlanPart($default, 'total');
-        $inClass = $mode === 'IN' ? 'is-counted' : 'is-free';
-        $outClass = $mode === 'OUT' ? 'is-counted' : 'is-free';
-        $totalClass = $mode === 'TOTAL' ? 'is-counted' : 'is-free';
+        $inClass = $mode === 'IN' ? 'text-danger' : 'text-success';
+        $outClass = $mode === 'OUT' ? 'text-danger' : 'text-success';
+        $totalClass = $mode === 'TOTAL' ? 'text-danger' : 'text-success';
 
-        return '<span class="edbw-plan-bw"><span class="' . $inClass . '">' . htmlspecialchars($in) . '-D</span>'
+        return '<span class="font-weight-bold"><span class="' . $inClass . '">' . htmlspecialchars($in) . '-D</span>'
             . ' | <span class="' . $outClass . '">' . htmlspecialchars($out) . '-U</span>'
             . ' | <span class="' . $totalClass . '">' . htmlspecialchars($total) . '-T</span></span>';
     }

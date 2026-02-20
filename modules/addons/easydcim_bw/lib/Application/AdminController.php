@@ -809,11 +809,12 @@ final class AdminController
                     $cp = trim((string) ($row['connected_port_label'] ?? ''));
                     $ci = trim((string) ($row['connected_item_label'] ?? ''));
                     $sp = trim((string) ($row['speed'] ?? ''));
+                    $normalizedSwitch = $this->normalizeSwitchDisplayLabel($ci);
                     if ($cp !== '' && !in_array($cp, $portLabels, true)) {
                         $portLabels[] = $cp;
                     }
-                    if ($ci !== '' && !in_array($ci, $switchLabels, true)) {
-                        $switchLabels[] = $ci;
+                    if ($normalizedSwitch !== '' && !in_array($normalizedSwitch, $switchLabels, true)) {
+                        $switchLabels[] = $normalizedSwitch;
                     }
                     if ($sp !== '' && !in_array($sp, $speedLabels, true)) {
                         $speedLabels[] = $sp;
@@ -823,18 +824,6 @@ final class AdminController
             $portLabelText = !empty($portLabels) ? implode(' | ', array_slice($portLabels, 0, 3)) : $this->t('m_no_data');
             $switchLabelText = !empty($switchLabels) ? implode(' | ', array_slice($switchLabels, 0, 3)) : $this->t('m_no_data');
             $speedLabelText = !empty($speedLabels) ? implode(' | ', array_slice($speedLabels, 0, 3)) : $this->t('m_no_data');
-            $detailRows = [
-                [$this->t('product_id'), (string) ((int) ($svc['pid'] ?? 0))],
-                ['IP', trim((string) ($svc['ip'] ?? '')) !== '' ? (string) $svc['ip'] : '-'],
-                [$this->t('order_id'), trim((string) ($svc['easydcim_order_id'] ?? '')) !== '' ? (string) $svc['easydcim_order_id'] : '-'],
-                ['EasyDCIM Service', trim((string) ($svc['easydcim_service_id'] ?? '')) !== '' ? (string) $svc['easydcim_service_id'] : '-'],
-                ['EasyDCIM Server', trim((string) ($svc['easydcim_server_id'] ?? '')) !== '' ? (string) $svc['easydcim_server_id'] : '-'],
-                [$this->t('connected_switches'), $switchLabelText],
-                [$this->t('connected_ports'), $portLabelText],
-                [$this->t('port_speeds'), $speedLabelText],
-                [$this->t('traffic_cycle'), $cycleText],
-                [$this->t('traffic_last_check'), $lastCheck !== '' ? $lastCheck : $this->t('m_no_data')],
-            ];
             $clientHtml = '<a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a>';
             $domain = trim((string) ($svc['domain'] ?? ''));
             $easyItem = [];
@@ -854,29 +843,56 @@ final class AdminController
             $publicIp = trim((string) ($svc['ip'] ?? ''));
             $iloIp = trim((string) ($easyItem['ilo_ip'] ?? ''));
             $labelText = trim((string) ($easyItem['label'] ?? ''));
-            if ($domain !== '') {
+            if ($switchLabelText === $this->t('m_no_data')) {
+                $fallbackSwitch = $this->normalizeSwitchDisplayLabel($labelText);
+                if ($fallbackSwitch !== '') {
+                    $switchLabelText = $fallbackSwitch;
+                }
+            }
+            $serviceMainLabel = $labelText;
+            if ($serviceMainLabel === '') {
+                $serviceMainLabel = $domain;
+            }
+            if ($serviceMainLabel === '') {
+                $serviceMainLabel = '#' . (int) ($svc['serviceid'] ?? 0);
+            }
+            $detailRows = [
+                [$this->t('product_id'), (string) ((int) ($svc['pid'] ?? 0))],
+                ['IP', trim((string) ($svc['ip'] ?? '')) !== '' ? (string) $svc['ip'] : '-'],
+                [$this->t('connected_switches'), $switchLabelText],
+                [$this->t('connected_ports'), $portLabelText],
+                [$this->t('port_speeds'), $speedLabelText],
+                [$this->t('traffic_cycle'), $cycleText],
+                [$this->t('traffic_last_check'), $lastCheck !== '' ? $lastCheck : $this->t('m_no_data')],
+            ];
+            if ($domain !== '' && strcasecmp($domain, $publicIp) !== 0) {
                 $clientHtml .= '<div class="edbw-help">' . htmlspecialchars($domain) . '</div>';
             }
             if ($publicIp !== '') {
                 $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">IP</span><span>' . htmlspecialchars($publicIp) . '</span></div>';
             }
-            if ($iloIp !== '') {
+            if ($iloIp !== '' && strcasecmp($iloIp, $publicIp) !== 0) {
                 $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">iLO</span><span>' . htmlspecialchars($iloIp) . '</span></div>';
+            }
+            if ($iloIp !== '') {
+                // Keep iLO in detail drawer even when same as public IP.
+                $detailRows[] = ['iLO IP', $iloIp];
             }
             if ($labelText !== '') {
                 $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">Label</span><span>' . htmlspecialchars($labelText) . '</span></div>';
             }
-            $detailHtml = '<details class="edbw-detail-toggle"><summary><span class="edbw-detail-pill">' . htmlspecialchars($this->t('details')) . '</span></summary><dl class="edbw-detail-list">';
-            foreach ($detailRows as [$label, $value]) {
-                $detailHtml .= '<dt>' . htmlspecialchars((string) $label) . '</dt><dd>' . htmlspecialchars((string) $value) . '</dd>';
-            }
-            $detailHtml .= '</dl></details>';
+            $detailPayload = ['title' => $serviceMainLabel, 'rows' => $detailRows];
+            $detailPayloadAttr = htmlspecialchars((string) json_encode($detailPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8');
+            $detailHtml = '<button type="button" class="btn btn-default edbw-detail-open" data-edbw-detail="' . $detailPayloadAttr . '">' . htmlspecialchars($this->t('details')) . '</button>';
             $trafficUrl = $this->buildTabUrl('traffic', [
                 'traffic_q' => (string) ((int) ($svc['serviceid'] ?? 0)),
                 'focus_serviceid' => (string) ((int) ($svc['serviceid'] ?? 0)),
             ]);
+            $serviceUrl = (string) ($svc['service_url'] ?? '#');
+            $serviceCellHtml = '<a class="edbw-service-main-link" href="' . htmlspecialchars($trafficUrl) . '">' . htmlspecialchars($serviceMainLabel) . '</a>'
+                . '<div class="edbw-help"><a href="' . htmlspecialchars($serviceUrl) . '">#' . (int) ($svc['serviceid'] ?? 0) . '</a></div>';
             echo '<tr>';
-            echo '<td><a href="' . htmlspecialchars($trafficUrl) . '">#' . (int) $svc['serviceid'] . '</a></td>';
+            echo '<td>' . $serviceCellHtml . '</td>';
             echo '<td>' . $clientHtml . '</td>';
             echo '<td>' . htmlspecialchars($switchLabelText) . '</td>';
             echo '<td>' . $portsHtml . '</td>';
@@ -889,6 +905,34 @@ final class AdminController
             echo '<tr><td colspan="7">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
+        echo '<div id="edbw-detail-drawer" class="edbw-detail-drawer" aria-hidden="true">'
+            . '<div class="edbw-detail-backdrop" data-edbw-close="1"></div>'
+            . '<div class="edbw-detail-panel">'
+            . '<button type="button" class="edbw-detail-close" data-edbw-close="1">&times;</button>'
+            . '<h4 class="edbw-detail-title"></h4>'
+            . '<dl class="edbw-detail-list edbw-detail-list-drawer"></dl>'
+            . '</div></div>';
+        echo '<script>(function(){'
+            . 'var drawer=document.getElementById("edbw-detail-drawer");'
+            . 'if(!drawer){return;}'
+            . 'var titleEl=drawer.querySelector(".edbw-detail-title");'
+            . 'var listEl=drawer.querySelector(".edbw-detail-list-drawer");'
+            . 'function closeDrawer(){drawer.classList.remove("open");drawer.setAttribute("aria-hidden","true");}'
+            . 'function openDrawer(payload){if(!payload){return;}'
+            . 'titleEl.textContent=payload.title||"Details";'
+            . 'listEl.innerHTML="";'
+            . 'var rows=Array.isArray(payload.rows)?payload.rows:[];'
+            . 'rows.forEach(function(row){if(!Array.isArray(row)||row.length<2){return;}'
+            . 'var dt=document.createElement("dt");dt.textContent=String(row[0]||"");'
+            . 'var dd=document.createElement("dd");dd.textContent=String(row[1]||"-");'
+            . 'listEl.appendChild(dt);listEl.appendChild(dd);});'
+            . 'drawer.classList.add("open");drawer.setAttribute("aria-hidden","false");}'
+            . 'document.querySelectorAll(".edbw-detail-open").forEach(function(btn){btn.addEventListener("click",function(){'
+            . 'var raw=btn.getAttribute("data-edbw-detail")||"";if(!raw){return;}'
+            . 'try{openDrawer(JSON.parse(raw));}catch(e){}});});'
+            . 'drawer.querySelectorAll("[data-edbw-close=\'1\']").forEach(function(el){el.addEventListener("click",closeDrawer);});'
+            . 'document.addEventListener("keydown",function(e){if(e.key==="Escape"){closeDrawer();}});'
+            . '})();</script>';
         $this->renderPager('servers', 'servers_page_assigned', $assignedPage, $servicesPages, [
             'servers_q' => $search,
             'servers_per_page' => (string) $serversPerPage,
@@ -5286,6 +5330,7 @@ final class AdminController
                     $stateText = $this->isFa ? 'بدون ترافیک' : 'Idle';
                 }
                 $name = $this->resolvePortDisplayName($r);
+                $name = $this->normalizePortPresentationLabel($name);
                 $speed = trim((string) ($r['speed'] ?? ''));
                 $traffic = $this->formatPortTraffic((float) ($r['traffic_total'] ?? 0.0));
                 $speedHtml = $speed !== '' ? '<span class="edbw-port-speed">' . htmlspecialchars($speed) . '</span>' : '';
@@ -5376,6 +5421,47 @@ final class AdminController
             return '#' . $portId;
         }
         return '-';
+    }
+
+    private function normalizePortPresentationLabel(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '-') {
+            return '-';
+        }
+        $iface = $this->extractInterfaceName($value);
+        if ($iface !== '') {
+            return $iface;
+        }
+        if (preg_match('/#\s*\d+\s+(.+)/', $value, $m)) {
+            $tail = trim((string) ($m[1] ?? ''));
+            $ifaceTail = $this->extractInterfaceName($tail);
+            if ($ifaceTail !== '') {
+                return $ifaceTail;
+            }
+            if ($tail !== '' && !$this->isSimpleNumericLabel($tail)) {
+                return $tail;
+            }
+        }
+        return $value;
+    }
+
+    private function normalizeSwitchDisplayLabel(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '-') {
+            return '';
+        }
+        if (preg_match('/#\s*\d+\s+(.+)/', $value, $m)) {
+            $tail = trim((string) ($m[1] ?? ''));
+            if ($tail !== '') {
+                return $tail;
+            }
+        }
+        if ($this->isSimpleNumericLabel($value)) {
+            return '';
+        }
+        return $value;
     }
 
     private function extractInterfaceName(string $text): string
@@ -5609,15 +5695,11 @@ final class AdminController
             }
 
             $currentConnected = trim((string) ($rows[$idx]['connected_port_label'] ?? ''));
-            $currentConnectedItem = trim((string) ($rows[$idx]['connected_item_label'] ?? ''));
             $currentName = trim((string) ($rows[$idx]['name'] ?? ''));
             $detailLabel = trim((string) ($detail['label'] ?? ''));
             if ($detailLabel !== '') {
                 if ($currentConnected === '' || $this->isSimpleNumericLabel($currentConnected)) {
                     $rows[$idx]['connected_port_label'] = $detailLabel;
-                }
-                if ($currentConnectedItem === '' || $this->isSimpleNumericLabel($currentConnectedItem)) {
-                    $rows[$idx]['connected_item_label'] = $detailLabel;
                 }
                 if ($currentName === '' || $this->isSimpleNumericLabel($currentName)) {
                     $rows[$idx]['name'] = $detailLabel;
@@ -5904,7 +5986,7 @@ final class AdminController
             'base_quota' => 'سقف پایه',
             'extra_quota' => 'خرید اضافه',
             'reset_at' => 'تاریخ ریست',
-            'connected_switches' => 'سوییچ/آیتم متصل',
+            'connected_switches' => 'SW',
             'connected_ports' => 'پورت‌های متصل',
             'port_speeds' => 'سرعت لینک',
             'status' => 'وضعیت',
@@ -6146,7 +6228,7 @@ final class AdminController
             'base_quota' => 'Base Quota',
             'extra_quota' => 'Extra Bought',
             'reset_at' => 'Reset At',
-            'connected_switches' => 'Connected switch/item',
+            'connected_switches' => 'SW',
             'connected_ports' => 'Connected ports',
             'port_speeds' => 'Link speed',
             'status' => 'Status',

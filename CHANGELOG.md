@@ -2,6 +2,22 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.98] - 2026-02-20
+### Changed
+- Servers tab now shows service-focused names instead of raw IDs:
+  - service column links by service label/hostname to Traffic tab
+  - WHMCS service ID is kept as a secondary link under the service name.
+- Connected switch column label is simplified to `SW`.
+- Client meta block now avoids duplicate hostname/IP output and only shows unique values.
+
+### Added
+- New side drawer details panel (half-screen) for Servers rows, opened via `Details` button.
+- Drawer contains compact operational data (IP, SW, connected ports, speed, cycle, last check) without forcing inline row expansion.
+
+### Fixed
+- Port display label normalization improved to prefer readable interface names and avoid broken/truncated-looking output.
+- Prevented copying connected-port label into switch/item label during enrichment.
+
 ## [1.97] - 2026-02-20
 ### Added
 - Added GitHub update source visibility on dashboard with status card and quick check action.

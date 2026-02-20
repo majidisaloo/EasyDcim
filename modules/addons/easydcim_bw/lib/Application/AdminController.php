@@ -1002,19 +1002,32 @@ final class AdminController
     private function buildTabUrl(string $tab, array $extra = []): string
     {
         $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
-        if ($uri === '') {
-            return '?tab=' . rawurlencode($tab);
-        }
-        $parts = parse_url($uri);
+        $parts = $uri !== '' ? (parse_url($uri) ?: []) : [];
         $path = (string) ($parts['path'] ?? '');
-        if ($path === '') {
-            $path = 'addonmodules.php';
+        if ($path === '' || stripos($path, 'addonmodules.php') === false) {
+            $baseDir = trim((string) dirname($path), '/\\');
+            $path = ($baseDir !== '' && $baseDir !== '.') ? ('/' . $baseDir . '/addonmodules.php') : 'addonmodules.php';
         }
+
         $query = [];
         if (!empty($parts['query'])) {
             parse_str((string) $parts['query'], $query);
+        } elseif (!empty($_GET) && is_array($_GET)) {
+            $query = $_GET;
         }
-        unset($query['action'], $query['api'], $query['op'], $query['ajax'], $query['auto'], $query['tab']);
+
+        unset(
+            $query['action'],
+            $query['api'],
+            $query['op'],
+            $query['ajax'],
+            $query['auto'],
+            $query['tab'],
+            $query['search'],
+            $query['q'],
+            $query['rp']
+        );
+        $query['module'] = 'easydcim_bw';
         $query['tab'] = $tab;
         foreach ($extra as $k => $v) {
             if ($v === '' || $v === null) {

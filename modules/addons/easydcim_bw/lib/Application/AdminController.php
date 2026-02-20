@@ -853,7 +853,7 @@ final class AdminController
             echo '<td>' . $portsHtml . '</td>';
             echo '<td>' . htmlspecialchars($this->domainStatusLabel((string) ($svc['domainstatus'] ?? ''))) . '</td>';
             echo '<td>' . $detailHtml . '</td>';
-            echo '<td><form method="post" class="edbw-form-inline" style="margin:0;padding:0;border:0;background:none"><input type="hidden" name="tab" value="servers"><input type="hidden" name="action" value="test_service_item"><input type="hidden" name="test_serviceid" value="' . (int) $svc['serviceid'] . '"><button type="submit" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('test')) . '</button></form></td>';
+            echo '<td><form method="post" class="edbw-test-form"><input type="hidden" name="tab" value="servers"><input type="hidden" name="action" value="test_service_item"><input type="hidden" name="test_serviceid" value="' . (int) $svc['serviceid'] . '"><button type="submit" class="btn edbw-test-btn">' . htmlspecialchars($this->t('test')) . '</button></form></td>';
             echo '</tr>';
         }
         if (empty($servicesForPage)) {

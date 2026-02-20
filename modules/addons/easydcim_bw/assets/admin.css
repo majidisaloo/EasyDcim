@@ -319,6 +319,36 @@
   text-align: center;
 }
 
+.edbw-test-form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.edbw-test-btn {
+  border: 1px solid #2563eb !important;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  color: #ffffff !important;
+  border-radius: 999px !important;
+  padding: 6px 14px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.24);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.edbw-test-btn:hover,
+.edbw-test-btn:focus {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+  filter: brightness(1.05);
+}
+
 .edbw-port-summary {
   font-weight: 700;
 }

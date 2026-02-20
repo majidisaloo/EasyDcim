@@ -2,6 +2,12 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.94] - 2026-02-20
+### Fixed
+- Dashboard EasyDCIM connection card now uses smarter runtime validation instead of falling back to false `Configured but disconnected` after cache expiry.
+- Added recent API-call based connectivity inference and short-throttled lightweight probe to keep status accurate without slowing admin pages.
+- Connection state now preserves last known-good cache when probe transiently fails, reducing false disconnect alerts.
+
 ## [1.93] - 2026-02-20
 ### Fixed
 - Servers batch test now auto-continues reliably without requiring manual `Continue` clicks:

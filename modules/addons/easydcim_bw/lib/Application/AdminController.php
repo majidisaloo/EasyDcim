@@ -2187,16 +2187,96 @@ final class AdminController
             return ['text' => $this->t('m_not_configured'), 'state' => 'error'];
         }
 
+        $nowTs = time();
         $cacheAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'conn_runtime_cache_at')->value('meta_value');
         $cacheJson = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'conn_runtime_cache_json')->value('meta_value');
-        if ($cacheAt !== '' && strtotime($cacheAt) > time() - 60 && $cacheJson !== '') {
+        $cachedState = null;
+        if ($cacheAt !== '' && strtotime($cacheAt) > $nowTs - 60 && $cacheJson !== '') {
             $decoded = json_decode($cacheJson, true);
             if (is_array($decoded) && isset($decoded['text'], $decoded['state'])) {
                 return ['text' => (string) $decoded['text'], 'state' => (string) $decoded['state']];
             }
         }
+        if ($cacheJson !== '') {
+            $decoded = json_decode($cacheJson, true);
+            if (is_array($decoded) && isset($decoded['text'], $decoded['state'])) {
+                $cachedState = ['text' => (string) $decoded['text'], 'state' => (string) $decoded['state']];
+            }
+        }
 
-        return ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
+        $probeAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'conn_runtime_probe_at')->value('meta_value');
+        if ($probeAt !== '' && strtotime($probeAt) > $nowTs - 90 && is_array($cachedState)) {
+            return $cachedState;
+        }
+        Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+            ['meta_key' => 'conn_runtime_probe_at'],
+            ['meta_value' => date('Y-m-d H:i:s', $nowTs), 'updated_at' => date('Y-m-d H:i:s', $nowTs)]
+        );
+
+        $recentState = $this->connectionStateFromRecentApiLogs($nowTs);
+        if (is_array($recentState)) {
+            $this->storeConnectionRuntimeState($recentState);
+            return $recentState;
+        }
+
+        try {
+            $client = $this->makeEasyDcimClient();
+            $probe = $client->pingInfo(3);
+            if (!empty($probe['ok'])) {
+                $state = ['text' => $this->t('m_connected'), 'state' => 'ok'];
+                $this->storeConnectionRuntimeState($state);
+                return $state;
+            }
+            if (!empty($probe['reachable'])) {
+                $state = ['text' => $this->t('m_configured_reachable'), 'state' => 'warn'];
+                $this->storeConnectionRuntimeState($state);
+                return $state;
+            }
+
+            $state = ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
+            $this->storeConnectionRuntimeState($state);
+            return is_array($cachedState) ? $cachedState : $state;
+        } catch (\Throwable $e) {
+            return is_array($cachedState)
+                ? $cachedState
+                : ['text' => $this->t('m_configured_disconnected'), 'state' => 'warn'];
+        }
+    }
+
+    private function connectionStateFromRecentApiLogs(int $nowTs): ?array
+    {
+        try {
+            $since = date('Y-m-d H:i:s', $nowTs - 300);
+            $rows = Capsule::table('mod_easydcim_bw_guard_logs')
+                ->where('message', 'easydcim_api_call')
+                ->where('created_at', '>=', $since)
+                ->orderBy('id', 'desc')
+                ->limit(20)
+                ->get(['details_json']);
+
+            $hasReachable = false;
+            foreach ($rows as $row) {
+                $payload = json_decode((string) ($row->details_json ?? ''), true);
+                if (!is_array($payload)) {
+                    continue;
+                }
+                $code = (int) ($payload['http_code'] ?? 0);
+                if ($code >= 200 && $code < 300) {
+                    return ['text' => $this->t('m_connected'), 'state' => 'ok'];
+                }
+                if ($code >= 300 && $code < 500) {
+                    $hasReachable = true;
+                }
+            }
+
+            if ($hasReachable) {
+                return ['text' => $this->t('m_configured_reachable'), 'state' => 'warn'];
+            }
+        } catch (\Throwable $e) {
+            // Ignore runtime status inference failures; dashboard must stay responsive.
+        }
+
+        return null;
     }
 
     private function checkReleaseUpdate(): array

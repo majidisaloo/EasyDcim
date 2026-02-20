@@ -223,12 +223,12 @@ final class EasyDcimClient
         return $best;
     }
 
-    public function pingInfo(): array
+    public function pingInfo(int $timeout = 5): array
     {
         if ($this->baseUrl === '' || $this->token === '') {
             return ['ok' => false, 'http_code' => 0, 'error' => 'missing_base_or_token'];
         }
-        $result = $this->request('GET', '/api/v3/client/services', null, null, false, 5);
+        $result = $this->request('GET', '/api/v3/client/services', null, null, false, max(1, $timeout));
         $code = (int) ($result['http_code'] ?? 0);
         return [
             'ok' => $code >= 200 && $code < 300,

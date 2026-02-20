@@ -16,15 +16,26 @@
         <h3>{$i18n.current_cycle}</h3>
         <div class="edbw-kpi">{if $is_fa}مصرف:{else}Used:{/if} <strong>{$used_gb|string_format:"%.2f"} GB</strong></div>
         <div class="edbw-kpi">{if $is_fa}باقی‌مانده:{else}Remaining:{/if} <strong>{$remaining_gb|string_format:"%.2f"} GB</strong></div>
+        <div class="edbw-kpi">{$i18n.base_plan}: <strong>{$base_plan_gb|string_format:"%.2f"} GB</strong></div>
+        <div class="edbw-kpi">{$i18n.extra_bought}: <strong>{$extra_bought_gb|string_format:"%.2f"} GB</strong></div>
+        <div class="edbw-kpi">{$i18n.total_owned}: <strong>{$total_owned_gb|string_format:"%.2f"} GB</strong></div>
+        <div class="edbw-kpi">{$i18n.allowed_effective}: <strong>{$allowed_gb|string_format:"%.2f"} GB</strong></div>
         <div class="edbw-kpi">{if $is_fa}حالت:{else}Mode:{/if} <strong>{$mode}</strong></div>
         <div class="edbw-kpi">{if $is_fa}وضعیت:{else}Status:{/if} <strong>{$status}</strong></div>
         <div class="edbw-kpi">{if $is_fa}سیکل:{else}Cycle:{/if} {$cycle_start} → {$cycle_end}</div>
         <div class="edbw-kpi">{if $is_fa}ریست:{else}Reset at:{/if} {$reset_at} ({$days_to_reset} {if $is_fa}روز{/if}{if !$is_fa}days{/if})</div>
+        <div class="edbw-kpi">{$i18n.credit_balance}: <strong>{$credit|string_format:"%.2f"}</strong></div>
+        <div class="edbw-kpi"><a class="btn btn-default btn-xs" href="{$add_funds_url}">{$i18n.add_funds}</a></div>
       </div>
 
       <div class="edbw-panel edbw-chart-panel">
         <div class="edbw-chart-top">
           <h3>Traffic Graph</h3>
+          <select id="edbw-range-select">
+            <option value="cycle">cycle</option>
+            <option value="24h">24h</option>
+            <option value="7d">7d</option>
+          </select>
           <select id="edbw-mode-select">
             <option value="TOTAL">TOTAL</option>
             <option value="IN">IN</option>
@@ -42,10 +53,11 @@
           <select name="buy_package_id" required>
             <option value="">Select package</option>
             {foreach $packages as $pkg}
-              <option value="{$pkg.id}">{$pkg.name} - {$pkg.size_gb}GB - {$pkg.price}</option>
+              <option value="{$pkg.id}">{$pkg.name} - {$pkg.size_gb}GB - {$pkg.price} (+10% = {$pkg.price_with_tax})</option>
             {/foreach}
           </select>
-          <button class="btn btn-primary" type="submit">Create Invoice</button>
+          <button class="btn btn-primary" type="submit">{if $is_fa}خرید از اعتبار{/if}{if !$is_fa}Buy from Credit{/if}</button>
+          <a class="btn btn-default" href="{$add_funds_url}">{$i18n.add_funds}</a>
         </div>
       </form>
     </div>
@@ -105,11 +117,12 @@
 
     <script>
       (function() {
-        var data = {$chart_json nofilter};
-        var labels = data.labels || [];
-        var datasets = data.datasets || [];
+        var ranges = {$chart_ranges_json nofilter};
+        var modeEl = document.getElementById('edbw-mode-select');
+        var rangeEl = document.getElementById('edbw-range-select');
 
-        function toSeries(nameSet) {
+        function toSeries(rangeData, nameSet) {
+          var datasets = (rangeData && rangeData.datasets) ? rangeData.datasets : [];
           return datasets.filter(function(ds) {
             var n = (ds.label || ds.name || '').toLowerCase();
             return nameSet.some(function(key) { return n.indexOf(key) !== -1; });
@@ -127,9 +140,16 @@
         }
 
         var ctx = document.getElementById('edbw-chart').getContext('2d');
+        function modeKeys(mode) {
+          return mode === 'IN' ? ['inbound', 'in'] : (mode === 'OUT' ? ['outbound', 'out'] : ['total']);
+        }
+        function currentRangeData() {
+          var key = (rangeEl && rangeEl.value) ? rangeEl.value : 'cycle';
+          return ranges[key] || {labels: [], datasets: []};
+        }
         var chart = new Chart(ctx, {
           type: 'line',
-          data: { labels: labels, datasets: toSeries(['total']) },
+          data: { labels: (currentRangeData().labels || []), datasets: toSeries(currentRangeData(), modeKeys((modeEl && modeEl.value) ? modeEl.value : 'TOTAL')) },
           options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -137,12 +157,21 @@
           }
         });
 
-        document.getElementById('edbw-mode-select').addEventListener('change', function(e) {
-          var mode = e.target.value;
-          var keys = mode === 'IN' ? ['inbound', 'in'] : (mode === 'OUT' ? ['outbound', 'out'] : ['total']);
-          chart.data.datasets = toSeries(keys);
+        function refreshChart() {
+          var data = currentRangeData();
+          chart.data.labels = data.labels || [];
+          chart.data.datasets = toSeries(data, modeKeys((modeEl && modeEl.value) ? modeEl.value : 'TOTAL'));
           chart.update();
+        }
+
+        document.getElementById('edbw-mode-select').addEventListener('change', function() {
+          refreshChart();
         });
+        if (rangeEl) {
+          rangeEl.addEventListener('change', function() {
+            refreshChart();
+          });
+        }
       })();
     </script>
   {/if}

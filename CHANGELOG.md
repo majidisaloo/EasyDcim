@@ -2,6 +2,17 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.95] - 2026-02-20
+### Added
+- Traffic tab now shows **Default Plan BW** in compact format (`D | U | T`) with mode-based highlighting.
+- Traffic tab rows now include expandable details (base quota, extra bought, effective allowed, reset time, and service technical context).
+- Client area now shows credit balance, add-funds shortcut, base/extra/total quota summary, and chart range switching (`cycle`, `24h`, `7d`).
+
+### Fixed
+- Manual traffic purchase now tries to pay invoice from client credit first, then records payment status accurately.
+- Module package invoices now mark items as taxed by default (manual + cron auto-buy invoice creation).
+- Admin service tab fields now include richer EasyDcim-BW cycle/remaining/extra information.
+
 ## [1.94] - 2026-02-20
 ### Fixed
 - Dashboard EasyDCIM connection card now uses smarter runtime validation instead of falling back to false `Configured but disconnected` after cache expiry.

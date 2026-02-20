@@ -1051,16 +1051,17 @@ final class AdminController
     {
         $q = Capsule::table('mod_easydcim_bw_guard_service_state as s')
             ->join('tblhosting as h', 'h.id', '=', 's.serviceid')
-            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
             ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
             ->whereIn('h.domainstatus', ['Active', 'Suspended'])
             ->select([
                 's.serviceid',
                 's.userid',
                 'h.packageid as pid',
+                'h.dedicatedip',
                 's.last_used_gb',
                 's.last_remaining_gb',
                 's.last_status',
+                's.mode',
                 's.last_check_at',
                 's.cycle_start',
                 's.cycle_end',
@@ -1069,23 +1070,42 @@ final class AdminController
             ]);
         $this->applyScopeFilter($q);
         $rows = $q->orderByDesc('s.last_check_at')->orderByDesc('s.serviceid')->limit(300)->get();
+        $defaultsByPid = [];
+        $pidList = [];
+        foreach ($rows as $r) {
+            $pid = (int) ($r->pid ?? 0);
+            if ($pid > 0) {
+                $pidList[$pid] = $pid;
+            }
+        }
+        if (!empty($pidList)) {
+            $defaultRows = Capsule::table('mod_easydcim_bw_guard_product_defaults')
+                ->whereIn('pid', array_values($pidList))
+                ->where('enabled', 1)
+                ->get();
+            foreach ($defaultRows as $dr) {
+                $defaultsByPid[(int) $dr->pid] = $dr;
+            }
+        }
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('traffic_report_title')) . '</h3>';
         echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>'
             . htmlspecialchars($this->t('service')) . '</th><th>'
             . htmlspecialchars($this->t('client')) . '</th><th>'
-            . htmlspecialchars($this->t('product_id')) . '</th><th>'
+            . htmlspecialchars($this->t('default_plan_bw')) . '</th><th>'
             . htmlspecialchars($this->t('traffic_used_gb')) . '</th><th>'
             . htmlspecialchars($this->t('traffic_remaining_gb')) . '</th><th>'
             . htmlspecialchars($this->t('traffic_allowed_gb')) . '</th><th>'
             . htmlspecialchars($this->t('traffic_cycle')) . '</th><th>'
             . htmlspecialchars($this->t('status')) . '</th><th>'
-            . htmlspecialchars($this->t('traffic_last_check')) . '</th></tr></thead><tbody>';
+            . htmlspecialchars($this->t('traffic_last_check')) . '</th><th>'
+            . htmlspecialchars($this->t('details')) . '</th></tr></thead><tbody>';
 
         foreach ($rows as $r) {
             $serviceId = (int) ($r->serviceid ?? 0);
             $userId = (int) ($r->userid ?? 0);
+            $pid = (int) ($r->pid ?? 0);
             $used = (float) ($r->last_used_gb ?? 0.0);
             $remaining = (float) ($r->last_remaining_gb ?? 0.0);
             $allowed = max(0.0, $used + $remaining);
@@ -1093,8 +1113,17 @@ final class AdminController
             if ($clientName === '') {
                 $clientName = '#' . $userId;
             }
+            $mode = strtoupper(trim((string) ($r->mode ?? 'TOTAL')));
             $cycleStart = trim((string) ($r->cycle_start ?? ''));
             $cycleEnd = trim((string) ($r->cycle_end ?? ''));
+            $extra = ($cycleStart !== '' && $cycleEnd !== '')
+                ? (float) Capsule::table('mod_easydcim_bw_guard_purchases')
+                    ->where('whmcs_serviceid', $serviceId)
+                    ->where('cycle_start', $cycleStart)
+                    ->where('cycle_end', $cycleEnd)
+                    ->where('payment_status', 'paid')
+                    ->sum('size_gb')
+                : 0.0;
             $cycle = $cycleStart !== '' && $cycleEnd !== ''
                 ? ($cycleStart . ' -> ' . $cycleEnd)
                 : $this->t('m_no_data');
@@ -1103,26 +1132,77 @@ final class AdminController
             if ($checkedAt === '') {
                 $checkedAt = $this->t('m_no_data');
             }
+            $defaultPlanHtml = $this->formatDefaultPlanBwBadge($defaultsByPid[$pid] ?? null, $mode);
+            $resetAt = $cycleEnd !== '' ? (date('Y-m-d H:i:s', strtotime($cycleEnd) + 1)) : $this->t('m_no_data');
 
             echo '<tr>';
             echo '<td><a href="clientsservices.php?userid=' . $userId . '&id=' . $serviceId . '">#' . $serviceId . '</a></td>';
             echo '<td><a href="clientssummary.php?userid=' . $userId . '">' . htmlspecialchars($clientName) . '</a></td>';
-            echo '<td>' . (int) ($r->pid ?? 0) . '</td>';
+            echo '<td>' . $defaultPlanHtml . '</td>';
             echo '<td>' . number_format($used, 2, '.', '') . '</td>';
             echo '<td>' . number_format($remaining, 2, '.', '') . '</td>';
             echo '<td>' . number_format($allowed, 2, '.', '') . '</td>';
             echo '<td>' . htmlspecialchars($cycle) . '</td>';
             echo '<td>' . htmlspecialchars($status) . '</td>';
             echo '<td>' . htmlspecialchars($checkedAt) . '</td>';
+            echo '<td><details class="edbw-traffic-detail"><summary>' . htmlspecialchars($this->t('details')) . '</summary>'
+                . '<div class="edbw-traffic-detail-body">'
+                . '<div><strong>' . htmlspecialchars($this->t('product_id')) . ':</strong> ' . $pid . '</div>'
+                . '<div><strong>IP:</strong> ' . htmlspecialchars((string) ($r->dedicatedip ?? '-')) . '</div>'
+                . '<div><strong>' . htmlspecialchars($this->t('mode')) . ':</strong> ' . htmlspecialchars($mode) . '</div>'
+                . '<div><strong>' . htmlspecialchars($this->t('base_quota')) . ':</strong> ' . number_format(max(0.0, $allowed - $extra), 2, '.', '') . ' GB</div>'
+                . '<div><strong>' . htmlspecialchars($this->t('extra_quota')) . ':</strong> ' . number_format($extra, 2, '.', '') . ' GB</div>'
+                . '<div><strong>' . htmlspecialchars($this->t('traffic_allowed_gb')) . ':</strong> ' . number_format($allowed, 2, '.', '') . ' GB</div>'
+                . '<div><strong>' . htmlspecialchars($this->t('traffic_cycle')) . ':</strong> ' . htmlspecialchars($cycle) . '</div>'
+                . '<div><strong>' . htmlspecialchars($this->t('reset_at')) . ':</strong> ' . htmlspecialchars($resetAt) . '</div>'
+                . '</div></details></td>';
             echo '</tr>';
         }
 
         if ($rows->isEmpty()) {
-            echo '<tr><td colspan="9">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+            echo '<tr><td colspan="10">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
 
         echo '</tbody></table></div>';
         echo '</div>';
+    }
+
+    private function formatDefaultPlanBwBadge(?object $default, string $mode): string
+    {
+        $mode = strtoupper($mode);
+        $in = $this->defaultPlanPart($default, 'in');
+        $out = $this->defaultPlanPart($default, 'out');
+        $total = $this->defaultPlanPart($default, 'total');
+        $inClass = $mode === 'IN' || $mode === 'TOTAL' ? 'is-active' : '';
+        $outClass = $mode === 'OUT' || $mode === 'TOTAL' ? 'is-active' : '';
+        $totalClass = $mode === 'TOTAL' ? 'is-active' : '';
+
+        return '<span class="edbw-plan-bw"><span class="' . $inClass . '">' . htmlspecialchars($in) . '-D</span>'
+            . ' | <span class="' . $outClass . '">' . htmlspecialchars($out) . '-U</span>'
+            . ' | <span class="' . $totalClass . '">' . htmlspecialchars($total) . '-T</span></span>';
+    }
+
+    private function defaultPlanPart(?object $default, string $part): string
+    {
+        if (!$default) {
+            return '0G';
+        }
+        if ($part === 'in') {
+            if ((int) ($default->unlimited_in ?? 0) === 1) {
+                return '∞';
+            }
+            return number_format((float) ($default->default_quota_in_gb ?? 0.0), 0, '.', '') . 'G';
+        }
+        if ($part === 'out') {
+            if ((int) ($default->unlimited_out ?? 0) === 1) {
+                return '∞';
+            }
+            return number_format((float) ($default->default_quota_out_gb ?? 0.0), 0, '.', '') . 'G';
+        }
+        if ((int) ($default->unlimited_total ?? 0) === 1) {
+            return '∞';
+        }
+        return number_format((float) ($default->default_quota_total_gb ?? $default->default_quota_gb ?? 0.0), 0, '.', '') . 'G';
     }
 
     private function renderPreflightPanel(): void
@@ -2636,7 +2716,7 @@ final class AdminController
             'name' => $name,
             'size_gb' => $size,
             'price' => $price,
-            'taxed' => 0,
+            'taxed' => 1,
             'available_for_pids' => null,
             'available_for_gids' => null,
             'is_active' => 1,
@@ -4962,11 +5042,15 @@ final class AdminController
             'ports_error' => 'خطا در بررسی پورت',
             'server_ports_not_supported' => 'endpoint پورت با Server ID در EasyDCIM شما پشتیبانی نمی‌شود',
             'traffic_report_title' => 'گزارش مصرف ترافیک سرویس‌ها',
+            'default_plan_bw' => 'پلن پیش‌فرض BW',
             'traffic_used_gb' => 'مصرف (GB)',
             'traffic_remaining_gb' => 'باقی‌مانده (GB)',
             'traffic_allowed_gb' => 'سقف موثر (GB)',
             'traffic_cycle' => 'بازه سیکل',
             'traffic_last_check' => 'آخرین بررسی',
+            'base_quota' => 'سقف پایه',
+            'extra_quota' => 'خرید اضافه',
+            'reset_at' => 'تاریخ ریست',
             'connected_switches' => 'سوییچ/آیتم متصل',
             'connected_ports' => 'پورت‌های متصل',
             'port_speeds' => 'سرعت لینک',
@@ -5182,11 +5266,15 @@ final class AdminController
             'ports_error' => 'Port lookup failed',
             'server_ports_not_supported' => 'Server-ID ports endpoint is not supported in your EasyDCIM',
             'traffic_report_title' => 'Traffic Usage Report',
+            'default_plan_bw' => 'Default Plan BW',
             'traffic_used_gb' => 'Used (GB)',
             'traffic_remaining_gb' => 'Remaining (GB)',
             'traffic_allowed_gb' => 'Effective Allowed (GB)',
             'traffic_cycle' => 'Cycle Window',
             'traffic_last_check' => 'Last Check',
+            'base_quota' => 'Base Quota',
+            'extra_quota' => 'Extra Bought',
+            'reset_at' => 'Reset At',
             'connected_switches' => 'Connected switch/item',
             'connected_ports' => 'Connected ports',
             'port_speeds' => 'Link speed',

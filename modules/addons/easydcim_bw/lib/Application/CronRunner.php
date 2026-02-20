@@ -483,7 +483,7 @@ final class CronRunner
             'sendinvoice' => false,
             'itemdescription1' => $description,
             'itemamount1' => $price,
-            'itemtaxed1' => 0,
+            'itemtaxed1' => 1,
         ]);
 
         $invoiceId = (int) ($create['invoiceid'] ?? 0);

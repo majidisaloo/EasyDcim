@@ -46,6 +46,7 @@ final class ClientController
                 'has_service' => false,
                 'message' => $this->t('no_service'),
                 'chart_json' => json_encode(['labels' => [], 'datasets' => []]),
+                'chart_ranges_json' => json_encode(['cycle' => ['labels' => [], 'datasets' => []], '24h' => ['labels' => [], 'datasets' => []], '7d' => ['labels' => [], 'datasets' => []]]),
                 'purchases' => [],
                 'is_fa' => $this->isFa,
             ];
@@ -72,10 +73,26 @@ final class ClientController
         $window = $cycle->calculate((string) $hosting->nextduedate, (string) $hosting->billingcycle);
 
         $graphService = new GraphService($client);
-        $chart = $graphService->getCachedOrFetch(
+        $chartCycle = $graphService->getCachedOrFetch(
             (int) $service->serviceid,
             (string) $service->easydcim_service_id,
             $window['start'],
+            date('Y-m-d H:i:s'),
+            max(5, $this->settings->getInt('graph_cache_minutes', 30)),
+            $this->settings->getBool('use_impersonation', false) ? (string) Capsule::table('tblclients')->where('id', $userId)->value('email') : null
+        );
+        $chart24h = $graphService->getCachedOrFetch(
+            (int) $service->serviceid,
+            (string) $service->easydcim_service_id,
+            date('Y-m-d H:i:s', time() - 86400),
+            date('Y-m-d H:i:s'),
+            max(5, $this->settings->getInt('graph_cache_minutes', 30)),
+            $this->settings->getBool('use_impersonation', false) ? (string) Capsule::table('tblclients')->where('id', $userId)->value('email') : null
+        );
+        $chart7d = $graphService->getCachedOrFetch(
+            (int) $service->serviceid,
+            (string) $service->easydcim_service_id,
+            date('Y-m-d H:i:s', time() - (86400 * 7)),
             date('Y-m-d H:i:s'),
             max(5, $this->settings->getInt('graph_cache_minutes', 30)),
             $this->settings->getBool('use_impersonation', false) ? (string) Capsule::table('tblclients')->where('id', $userId)->value('email') : null
@@ -93,7 +110,12 @@ final class ClientController
             ->where('is_active', 1)
             ->orderBy('size_gb')
             ->get()
-            ->map(static fn ($r): array => (array) $r)
+            ->map(static function ($r): array {
+                $row = (array) $r;
+                $price = (float) ($row['price'] ?? 0.0);
+                $row['price_with_tax'] = round($price * 1.10, 2);
+                return $row;
+            })
             ->all();
 
         $purchases = Capsule::table('mod_easydcim_bw_guard_purchases')
@@ -112,6 +134,16 @@ final class ClientController
             ->first();
 
         $daysToReset = max(0, (int) floor((strtotime($window['reset_at']) - time()) / 86400));
+        $credit = (float) Capsule::table('tblclients')->where('id', $userId)->value('credit');
+        $extraBought = (float) Capsule::table('mod_easydcim_bw_guard_purchases')
+            ->where('whmcs_serviceid', (int) $service->serviceid)
+            ->where('cycle_start', $window['start'])
+            ->where('cycle_end', $window['end'])
+            ->where('payment_status', 'paid')
+            ->sum('size_gb');
+        $allowed = max(0.0, (float) $service->last_used_gb + (float) $service->last_remaining_gb);
+        $basePlan = max(0.0, $allowed - $extraBought);
+        $totalOwned = $basePlan + $extraBought;
 
         return [
             'has_service' => true,
@@ -125,10 +157,21 @@ final class ClientController
             'reset_at' => $window['reset_at'],
             'days_to_reset' => $daysToReset,
             'flash' => $flash,
-            'chart_json' => json_encode($chart, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'chart_json' => json_encode($chartCycle, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'chart_ranges_json' => json_encode([
+                'cycle' => $chartCycle,
+                '24h' => $chart24h,
+                '7d' => $chart7d,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'packages' => $packages,
             'purchases' => $purchases,
             'autobuy_pref' => $autobuyPref ? (array) $autobuyPref : [],
+            'credit' => $credit,
+            'base_plan_gb' => $basePlan,
+            'extra_bought_gb' => $extraBought,
+            'total_owned_gb' => $totalOwned,
+            'allowed_gb' => $allowed,
+            'add_funds_url' => 'clientarea.php?action=addfunds',
             'is_fa' => $this->isFa,
             'i18n' => [
                 'traffic_overview' => $this->t('traffic_overview'),
@@ -158,7 +201,7 @@ final class ClientController
             'sendinvoice' => true,
             'itemdescription1' => sprintf('Extra Bandwidth %.2fGB for service #%d', (float) $package->size_gb, $serviceId),
             'itemamount1' => (float) $package->price,
-            'itemtaxed1' => (int) $package->taxed,
+            'itemtaxed1' => 1,
         ]);
         if (($create['result'] ?? '') !== 'success') {
             return $this->t('invoice_fail');
@@ -167,6 +210,14 @@ final class ClientController
         $invoiceId = (int) ($create['invoiceid'] ?? 0);
         if ($invoiceId <= 0) {
             return $this->t('invoice_invalid');
+        }
+
+        $credit = (float) Capsule::table('tblclients')->where('id', $userId)->value('credit');
+        if ($credit > 0) {
+            localAPI('ApplyCredit', [
+                'invoiceid' => $invoiceId,
+                'amount' => $credit,
+            ]);
         }
 
         $status = (string) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status');
@@ -201,7 +252,10 @@ final class ClientController
             ],
         ]);
 
-        return ($this->isFa ? 'فاکتور #' : 'Invoice #') . $invoiceId . ($this->isFa ? ' برای این سیکل ساخته شد.' : ' created successfully for this cycle.');
+        if ($paymentStatus === 'paid') {
+            return ($this->isFa ? 'فاکتور #' : 'Invoice #') . $invoiceId . ($this->isFa ? ' با اعتبار پرداخت شد و پکیج فعال است.' : ' paid from credit and package is active.');
+        }
+        return ($this->isFa ? 'فاکتور #' : 'Invoice #') . $invoiceId . ($this->isFa ? ' ساخته شد. اعتبار کافی نبود؛ لطفا شارژ حساب انجام دهید.' : ' created. Credit was not enough; please add funds.');
     }
 
     private function saveClientAutoBuyPrefs(int $userId, int $serviceId): string
@@ -236,6 +290,12 @@ final class ClientController
             'purchases_cycle' => 'خریدهای این سیکل',
             'save' => 'ذخیره',
             'autobuy_title' => 'تنظیمات خرید خودکار',
+            'credit_balance' => 'اعتبار فعلی',
+            'add_funds' => 'افزایش اعتبار',
+            'base_plan' => 'پلن پایه',
+            'extra_bought' => 'خرید اضافه این سیکل',
+            'total_owned' => 'کل سقف (پایه + اضافه)',
+            'allowed_effective' => 'سقف موثر فعلی',
             'localapi_unavailable' => 'localAPI در دسترس نیست.',
             'invoice_fail' => 'ساخت فاکتور انجام نشد.',
             'invoice_invalid' => 'شناسه فاکتور معتبر نیست.',
@@ -248,6 +308,12 @@ final class ClientController
             'purchases_cycle' => 'Purchases in Current Cycle',
             'save' => 'Save',
             'autobuy_title' => 'Auto-Buy Preferences',
+            'credit_balance' => 'Current Credit',
+            'add_funds' => 'Add Funds',
+            'base_plan' => 'Base Plan',
+            'extra_bought' => 'Extra Bought in Cycle',
+            'total_owned' => 'Total Quota (Base + Extra)',
+            'allowed_effective' => 'Effective Allowed',
             'localapi_unavailable' => 'localAPI is unavailable.',
             'invoice_fail' => 'Could not create invoice.',
             'invoice_invalid' => 'Invoice creation returned invalid invoice id.',

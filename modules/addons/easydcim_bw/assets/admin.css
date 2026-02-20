@@ -418,6 +418,42 @@
   margin-bottom: 0;
 }
 
+.edbw-plan-bw {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.edbw-plan-bw .is-active {
+  color: #16a34a;
+}
+
+.edbw-traffic-detail {
+  text-align: left;
+}
+
+.edbw-wrap.edbw-fa .edbw-traffic-detail {
+  text-align: right;
+}
+
+.edbw-traffic-detail summary {
+  cursor: pointer;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.edbw-traffic-detail-body {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fbff;
+  font-size: 12px;
+}
+
+.edbw-traffic-detail-body > div {
+  margin: 0 0 4px;
+}
+
 @media (max-width: 900px) {
   .edbw-form-inline label {
     min-width: 100%;

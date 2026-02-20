@@ -64,6 +64,10 @@
   color: #1e293b;
 }
 
+.edbw-kpi .btn-xs {
+  margin-top: 4px;
+}
+
 @media (max-width: 900px) {
   .edbw-grid {
     grid-template-columns: 1fr;

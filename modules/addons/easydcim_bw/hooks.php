@@ -74,8 +74,31 @@ add_hook('AdminServicesTabFields', 1, static function (array $vars): array {
         }
     }
 
+    $cycleStart = (string) ($state->cycle_start ?? '');
+    $cycleEnd = (string) ($state->cycle_end ?? '');
+    $resetAt = ($cycleEnd !== '' ? date('Y-m-d H:i:s', strtotime($cycleEnd) + 1) : '');
+    $extraBought = 0.0;
+    if ($cycleStart !== '' && $cycleEnd !== '') {
+        $extraBought = (float) Capsule::table('mod_easydcim_bw_guard_purchases')
+            ->where('whmcs_serviceid', $serviceId)
+            ->where('cycle_start', $cycleStart)
+            ->where('cycle_end', $cycleEnd)
+            ->where('payment_status', 'paid')
+            ->sum('size_gb');
+    }
+    $used = (float) ($state->last_used_gb ?? 0.0);
+    $remaining = (float) ($state->last_remaining_gb ?? 0.0);
+    $allowed = max(0.0, $used + $remaining);
+    $basePlan = max(0.0, $allowed - $extraBought);
+
     return [
         'EasyDcim-BW Runtime Status' => $runtime,
+        'EasyDcim-BW Cycle Window' => ($cycleStart !== '' && $cycleEnd !== '') ? ($cycleStart . ' -> ' . $cycleEnd) : 'No data',
+        'EasyDcim-BW Reset At' => $resetAt !== '' ? $resetAt : 'No data',
+        'EasyDcim-BW Base Plan (GB)' => number_format($basePlan, 2, '.', ''),
+        'EasyDcim-BW Extra Bought (GB)' => number_format($extraBought, 2, '.', ''),
+        'EasyDcim-BW Effective Allowed (GB)' => number_format($allowed, 2, '.', ''),
+        'EasyDcim-BW Remaining (GB)' => number_format($remaining, 2, '.', ''),
         'EasyDcim-BW Override Quota (GB)' => $override ? (string) ($override->override_base_quota_gb ?? '') : '',
         'EasyDcim-BW Override Mode (IN/OUT/TOTAL)' => $override ? (string) ($override->override_mode ?? '') : '',
         'EasyDcim-BW Override Action (disable_ports/suspend/both)' => $override ? (string) ($override->override_action ?? '') : '',

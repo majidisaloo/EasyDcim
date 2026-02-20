@@ -62,6 +62,7 @@ final class Settings
             'managed_pids' => '',
             'managed_gids' => '',
             'poll_interval_minutes' => '15',
+            'servers_test_chunk_size' => '1',
             'graph_cache_minutes' => '30',
             'autobuy_enabled' => '0',
             'autobuy_threshold_gb' => '10',

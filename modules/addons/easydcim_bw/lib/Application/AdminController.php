@@ -403,6 +403,7 @@ final class AdminController
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('module_status')) . '</label><select name="module_enabled"><option value="1"' . ((string) $s->getString('module_enabled', '1') === '1' ? ' selected' : '') . '>' . htmlspecialchars($this->t('active')) . '</option><option value="0"' . ((string) $s->getString('module_enabled', '1') === '0' ? ' selected' : '') . '>' . htmlspecialchars($this->t('disabled')) . '</option></select><span class="edbw-help">' . htmlspecialchars($this->t('module_status_help')) . '</span></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('ui_language')) . '</label><select name="ui_language"><option value="auto"' . ($s->getString('ui_language', 'auto') === 'auto' ? ' selected' : '') . '>' . htmlspecialchars($this->t('lang_default')) . '</option><option value="english"' . ($s->getString('ui_language', 'auto') === 'english' ? ' selected' : '') . '>English</option><option value="farsi"' . ($s->getString('ui_language', 'auto') === 'farsi' ? ' selected' : '') . '>فارسی</option></select></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('poll_interval')) . '</label><input type="number" min="1" name="poll_interval_minutes" value="' . (int) $s->getInt('poll_interval_minutes', 15) . '"></div>';
+        echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('servers_test_chunk_size')) . '</label><input type="number" min="1" max="50" name="servers_test_chunk_size" value="' . (int) $s->getInt('servers_test_chunk_size', 1) . '"><span class="edbw-help">' . htmlspecialchars($this->t('servers_test_chunk_size_help')) . '</span></div>';
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('graph_cache')) . '</label><input type="number" min="5" name="graph_cache_minutes" value="' . (int) $s->getInt('graph_cache_minutes', 30) . '"></div>';
 
         echo '<div class="edbw-form-inline"><label>' . htmlspecialchars($this->t('autobuy_enabled')) . '</label><input type="checkbox" name="autobuy_enabled" value="1" ' . ($s->getBool('autobuy_enabled') ? 'checked' : '') . '></div>';
@@ -703,12 +704,14 @@ final class AdminController
             }
             echo '</div>';
             if ($runningNow) {
+                $elapsedSeconds = $this->resolveBatchElapsedSeconds($testAllState);
                 echo '<div class="alert alert-info">';
                 echo htmlspecialchars($this->t('servers_test_all_progress')) . ': '
                     . (int) ($testAllState['done'] ?? 0) . '/' . (int) ($testAllState['total'] ?? 0)
                     . ' (OK: ' . (int) ($testAllState['ok'] ?? 0)
                     . ', WARN: ' . (int) ($testAllState['warn'] ?? 0)
-                    . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')';
+                    . ', FAIL: ' . (int) ($testAllState['fail'] ?? 0) . ')'
+                    . ' | ' . htmlspecialchars($this->t('servers_test_all_elapsed')) . ': ' . htmlspecialchars($this->formatDuration($elapsedSeconds));
                 echo '</div>';
                 $autoUrl = $this->buildServersAutoContinueUrl();
                 if ($autoUrl !== '') {
@@ -722,6 +725,17 @@ final class AdminController
                     . 'if(form){form.submit();}'
                     . '},1200);'
                     . '})();</script>';
+            }
+            $lastDuration = (int) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_test_all_last_duration_seconds')->value('meta_value');
+            $lastFinishedAt = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_test_all_last_finished_at')->value('meta_value');
+            if ($lastDuration > 0 || $lastFinishedAt !== '') {
+                echo '<div class="alert alert-success">';
+                echo htmlspecialchars($this->t('servers_test_all_last_run')) . ': ';
+                if ($lastFinishedAt !== '') {
+                    echo htmlspecialchars($lastFinishedAt) . ' | ';
+                }
+                echo htmlspecialchars($this->t('servers_test_all_total_time')) . ': ' . htmlspecialchars($this->formatDuration($lastDuration));
+                echo '</div>';
             }
             if (count($easyServices) === 0 && $cacheAt === '') {
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_cache_empty_hint')) . '</div>';
@@ -2047,6 +2061,7 @@ final class AdminController
         $action = (string) ($_POST['action'] ?? '');
         $allowedGeneral = [
             'module_enabled', 'ui_language', 'poll_interval_minutes', 'graph_cache_minutes',
+            'servers_test_chunk_size',
             'autobuy_enabled', 'autobuy_threshold_gb', 'autobuy_default_package_id', 'autobuy_max_per_cycle',
             'update_mode', 'traffic_direction_map', 'default_calculation_mode', 'test_mode',
             'log_retention_days', 'preflight_strict_mode', 'purge_on_deactivate',
@@ -2094,6 +2109,13 @@ final class AdminController
         if ((int) ($payload['log_retention_days'] ?? 30) < 1) {
             $payload['log_retention_days'] = '30';
         }
+        $chunkSize = (int) ($payload['servers_test_chunk_size'] ?? 1);
+        if ($chunkSize < 1) {
+            $chunkSize = 1;
+        } elseif ($chunkSize > 50) {
+            $chunkSize = 50;
+        }
+        $payload['servers_test_chunk_size'] = (string) $chunkSize;
 
         Settings::saveToDatabase($payload);
             return ['type' => 'success', 'text' => $this->t('settings_saved')];
@@ -3804,7 +3826,8 @@ final class AdminController
             if (empty($state['queue']) || (int) ($state['remaining'] ?? 0) <= 0) {
                 return;
             }
-            $result = $this->testAllServices(max(1, $chunkSize), false);
+            $effectiveChunk = max(1, (int) $this->settings->getInt('servers_test_chunk_size', $chunkSize));
+            $result = $this->testAllServices($effectiveChunk, false);
             if (!empty($result['text'])) {
                 $this->logger->log('INFO', 'servers_test_all_background_tick', [
                     'message' => (string) $result['text'],
@@ -3942,7 +3965,7 @@ final class AdminController
             if (function_exists('set_time_limit')) {
                 @set_time_limit(60);
             }
-            $chunkSize = max(1, (int) ($chunkOverride ?? 1));
+            $chunkSize = max(1, (int) ($chunkOverride ?? $this->settings->getInt('servers_test_chunk_size', 1)));
             $state = $this->getTestAllState();
             $queue = $state['queue'];
 
@@ -4031,10 +4054,27 @@ final class AdminController
             $ok = (int) ($state['ok'] ?? 0);
             $warn = (int) ($state['warn'] ?? 0);
             $fail = (int) ($state['fail'] ?? 0);
+            $startedAtRaw = trim((string) ($state['started_at'] ?? ''));
+            $durationSeconds = 0;
+            if ($startedAtRaw !== '') {
+                $startedTs = strtotime($startedAtRaw);
+                if ($startedTs !== false) {
+                    $durationSeconds = max(0, time() - $startedTs);
+                }
+            }
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'servers_test_all_last_duration_seconds'],
+                ['meta_value' => (string) $durationSeconds, 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'servers_test_all_last_finished_at'],
+                ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+            );
             $this->clearTestAllState();
             return [
                 'type' => $fail > 0 ? 'warning' : 'success',
-                'text' => $this->t('servers_test_all_done') . ' | OK: ' . $ok . ' | WARN: ' . $warn . ' | FAIL: ' . $fail,
+                'text' => $this->t('servers_test_all_done') . ' | OK: ' . $ok . ' | WARN: ' . $warn . ' | FAIL: ' . $fail
+                    . ' | ' . $this->t('servers_test_all_total_time') . ': ' . $this->formatDuration($durationSeconds),
             ];
         } catch (\Throwable $e) {
             $this->logger->log('ERROR', 'servers_test_all_failed', ['error' => $e->getMessage()]);
@@ -4102,6 +4142,31 @@ final class AdminController
     private function clearTestAllState(): void
     {
         Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'servers_test_all_state')->delete();
+    }
+
+    private function resolveBatchElapsedSeconds(array $state): int
+    {
+        $started = trim((string) ($state['started_at'] ?? ''));
+        if ($started === '') {
+            return 0;
+        }
+        $ts = strtotime($started);
+        if ($ts === false) {
+            return 0;
+        }
+        return max(0, time() - $ts);
+    }
+
+    private function formatDuration(int $seconds): string
+    {
+        $seconds = max(0, $seconds);
+        $h = intdiv($seconds, 3600);
+        $m = intdiv($seconds % 3600, 60);
+        $s = $seconds % 60;
+        if ($h > 0) {
+            return sprintf('%02d:%02d:%02d', $h, $m, $s);
+        }
+        return sprintf('%02d:%02d', $m, $s);
     }
 
     private function resetTestAllServices(): array
@@ -5906,6 +5971,11 @@ final class AdminController
             'servers_test_all_reset' => 'ریست صف تست',
             'servers_test_all_reset_done' => 'صف تست همه سرویس‌ها ریست شد',
             'servers_test_all_progress' => 'پیشرفت تست گروهی',
+            'servers_test_all_elapsed' => 'زمان سپری‌شده',
+            'servers_test_all_total_time' => 'زمان کل تست',
+            'servers_test_all_last_run' => 'آخرین اجرای تست گروهی',
+            'servers_test_chunk_size' => 'تعداد تست در هر اجرا',
+            'servers_test_chunk_size_help' => 'هر چه بیشتر باشد تست سریع‌تر می‌شود اما فشار بیشتری می‌آورد.',
             'servers_sync_now' => 'همگام‌سازی سرورها (دستی)',
             'servers_cache_empty_hint' => 'کش سرورها خالی است. برای جلوگیری از کندی، لیست با همگام‌سازی دستی یا کرون پر می‌شود.',
             'servers_cache_refreshed' => 'کش سرورها به‌روزرسانی شد',
@@ -6143,6 +6213,11 @@ final class AdminController
             'servers_test_all_reset' => 'Reset Test Queue',
             'servers_test_all_reset_done' => 'Test-all queue has been reset',
             'servers_test_all_progress' => 'Batch test progress',
+            'servers_test_all_elapsed' => 'Elapsed',
+            'servers_test_all_total_time' => 'Total test time',
+            'servers_test_all_last_run' => 'Last batch run',
+            'servers_test_chunk_size' => 'Tests per run',
+            'servers_test_chunk_size_help' => 'Higher value finishes faster but adds more load.',
             'servers_sync_now' => 'Sync servers now',
             'servers_cache_empty_hint' => 'Servers cache is empty. To avoid page slowness, list is loaded by manual sync or cron.',
             'servers_cache_refreshed' => 'Servers cache refreshed',

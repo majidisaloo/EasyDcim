@@ -57,7 +57,8 @@ add_hook('AfterCronJob', 1, static function (): void {
     $runner->runUpdateCheck(__DIR__);
 
     try {
-        (new AdminController($settings, new Logger(), __DIR__))->runBackgroundMaintenanceFromCron(5);
+        $chunkSize = max(1, $settings->getInt('servers_test_chunk_size', 1));
+        (new AdminController($settings, new Logger(), __DIR__))->runBackgroundMaintenanceFromCron($chunkSize);
     } catch (\Throwable $e) {
         (new Logger())->log('ERROR', 'servers_test_all_background_hook_failed', ['error' => $e->getMessage()]);
     }

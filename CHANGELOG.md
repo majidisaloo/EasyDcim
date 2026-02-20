@@ -2,6 +2,18 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.92] - 2026-02-20
+### Changed
+- Servers tab is now bandwidth-first:
+  - `Used/Remaining/Effective Allowed` columns are shown directly in the main list.
+  - technical fields (`Product ID`, `IP`, `Order ID`, `EasyDCIM Service/Server`) moved into per-row **Details**.
+- Added clearer in-tab hint for traffic visibility and usage review flow.
+### Fixed
+- Port speed normalization now handles unrealistic raw values (like `1000000G`) and maps them to plausible interface rates (such as `1G` / `10G`).
+- Improved interface/port label extraction from nested EasyDCIM payloads so switch-side names/descriptions are preferred over raw numeric-only IDs.
+- Improved port state inference when API returns numeric status fields, reducing `(Unknown)` states.
+- Added new Servers-table UI styles for traffic values and details panel readability.
+
 ## [1.91] - 2026-02-19
 ### Fixed
 - Servers batch test flow is now fully form-based (no fragile AJAX fallback chain), so `Stop`/`Reset` actions reliably clear queue state.

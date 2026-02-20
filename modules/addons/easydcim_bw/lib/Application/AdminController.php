@@ -625,25 +625,51 @@ final class AdminController
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>' . htmlspecialchars($this->t('product_id')) . '</th><th>IP</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>EasyDCIM Service</th><th>EasyDCIM Server</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
+        echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_traffic_hint')) . '</p>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>' . htmlspecialchars($this->t('traffic_used_gb')) . '</th><th>' . htmlspecialchars($this->t('traffic_remaining_gb')) . '</th><th>' . htmlspecialchars($this->t('traffic_allowed_gb')) . '</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('details')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
         foreach ($services as $svc) {
             $testCache = $this->getServiceTestCache((int) $svc['serviceid']);
             $portsHtml = $this->renderPortStatusHtml($svc, $testCache);
+            $used = max(0.0, (float) ($svc['last_used_gb'] ?? 0.0));
+            $remaining = max(0.0, (float) ($svc['last_remaining_gb'] ?? 0.0));
+            $allowed = max(0.0, $used + $remaining);
+            $lastCheck = trim((string) ($svc['last_check_at'] ?? ''));
+            $usedText = number_format($used, 2, '.', '');
+            $remainingText = number_format($remaining, 2, '.', '');
+            $allowedText = number_format($allowed, 2, '.', '');
+            $cycleStart = trim((string) ($svc['cycle_start'] ?? ''));
+            $cycleEnd = trim((string) ($svc['cycle_end'] ?? ''));
+            $cycleText = ($cycleStart !== '' && $cycleEnd !== '')
+                ? ($cycleStart . ' -> ' . $cycleEnd)
+                : $this->t('m_no_data');
+            $detailRows = [
+                [$this->t('product_id'), (string) ((int) ($svc['pid'] ?? 0))],
+                ['IP', trim((string) ($svc['ip'] ?? '')) !== '' ? (string) $svc['ip'] : '-'],
+                [$this->t('order_id'), trim((string) ($svc['easydcim_order_id'] ?? '')) !== '' ? (string) $svc['easydcim_order_id'] : '-'],
+                ['EasyDCIM Service', trim((string) ($svc['easydcim_service_id'] ?? '')) !== '' ? (string) $svc['easydcim_service_id'] : '-'],
+                ['EasyDCIM Server', trim((string) ($svc['easydcim_server_id'] ?? '')) !== '' ? (string) $svc['easydcim_server_id'] : '-'],
+                [$this->t('traffic_cycle'), $cycleText],
+                [$this->t('traffic_last_check'), $lastCheck !== '' ? $lastCheck : $this->t('m_no_data')],
+            ];
+            $detailHtml = '<details class="edbw-detail-toggle"><summary>' . htmlspecialchars($this->t('details')) . '</summary><dl class="edbw-detail-list">';
+            foreach ($detailRows as [$label, $value]) {
+                $detailHtml .= '<dt>' . htmlspecialchars((string) $label) . '</dt><dd>' . htmlspecialchars((string) $value) . '</dd>';
+            }
+            $detailHtml .= '</dl></details>';
             echo '<tr>';
             echo '<td><a href="' . htmlspecialchars((string) $svc['service_url']) . '">#' . (int) $svc['serviceid'] . '</a></td>';
             echo '<td><a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a></td>';
-            echo '<td>' . (int) $svc['pid'] . '</td>';
-            echo '<td>' . htmlspecialchars((string) $svc['ip']) . '</td>';
-            echo '<td>' . htmlspecialchars((string) ($svc['easydcim_order_id'] ?: '-')) . '</td>';
-            echo '<td>' . htmlspecialchars((string) ($svc['easydcim_service_id'] ?: '-')) . '</td>';
-            echo '<td>' . htmlspecialchars((string) ($svc['easydcim_server_id'] ?: '-')) . '</td>';
+            echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($usedText) . '</span></td>';
+            echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($remainingText) . '</span></td>';
+            echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($allowedText) . '</span></td>';
             echo '<td>' . $portsHtml . '</td>';
             echo '<td>' . htmlspecialchars($this->domainStatusLabel((string) ($svc['domainstatus'] ?? ''))) . '</td>';
+            echo '<td>' . $detailHtml . '</td>';
             echo '<td><form method="post" class="edbw-form-inline" style="margin:0;padding:0;border:0;background:none"><input type="hidden" name="tab" value="servers"><input type="hidden" name="action" value="test_service_item"><input type="hidden" name="test_serviceid" value="' . (int) $svc['serviceid'] . '"><button type="submit" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('test')) . '</button></form></td>';
             echo '</tr>';
         }
         if (empty($services)) {
-            echo '<tr><td colspan="10">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+            echo '<tr><td colspan="9">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
         echo '</div>';
@@ -1929,6 +1955,7 @@ final class AdminController
                 }
                 $portRows[] = [
                     'name' => (string) ($p['name'] ?? ''),
+                    'description' => (string) ($p['description'] ?? ''),
                     'state' => (string) ($p['state'] ?? ''),
                     'is_up' => !empty($p['is_up']),
                     'traffic_total' => (float) ($p['traffic_total'] ?? 0.0),
@@ -1937,6 +1964,7 @@ final class AdminController
                     'connected_port_id' => $cpid,
                     'connected_item_id' => $ciid,
                     'connected_port_label' => (string) ($p['connected_port_label'] ?? ''),
+                    'connected_item_label' => (string) ($p['connected_item_label'] ?? ''),
                 ];
             }
             if (!empty($portRows)) {
@@ -2603,6 +2631,7 @@ final class AdminController
                 'h.domain',
                 'c.firstname', 'c.lastname', 'c.email',
                 's.easydcim_service_id as state_service_id',
+                's.last_used_gb', 's.last_remaining_gb', 's.last_check_at', 's.cycle_start', 's.cycle_end',
             ]);
         $this->applyScopeFilter($q);
         $q->whereIn('h.domainstatus', ['Active', 'Suspended']);
@@ -2830,6 +2859,11 @@ final class AdminController
                 'network_ports_total' => $networkPortsTotal,
                 'network_ports_up' => $networkPortsUp,
                 'network_traffic_total' => $networkTrafficTotal,
+                'last_used_gb' => (float) ($r->last_used_gb ?? 0.0),
+                'last_remaining_gb' => (float) ($r->last_remaining_gb ?? 0.0),
+                'last_check_at' => (string) ($r->last_check_at ?? ''),
+                'cycle_start' => (string) ($r->cycle_start ?? ''),
+                'cycle_end' => (string) ($r->cycle_end ?? ''),
             ];
         }
 
@@ -3636,20 +3670,41 @@ final class AdminController
         $connectedItem = $this->extractMixedRef($row['connected_item'] ?? $row['connectedItem'] ?? $row['connection_item'] ?? $row['conn_item'] ?? null);
 
         $portId = trim((string) ($row['port_id'] ?? $row['portId'] ?? $row['portid'] ?? $row['id'] ?? $selectedPort['id'] ?? ''));
-        $name = trim((string) ($row['name'] ?? $row['label'] ?? $row['user_label'] ?? $row['description'] ?? $row['number'] ?? $row['port_number'] ?? ''));
-        if ($name === '') {
-            $name = trim((string) ($selectedPort['label'] ?? $connectedPort['label'] ?? $row['connected_port_label'] ?? $row['connected_port_name'] ?? ''));
-        }
+        $name = trim((string) ($row['name'] ?? $row['label'] ?? $row['user_label'] ?? $row['interface_name'] ?? $row['if_name'] ?? $row['ifname'] ?? $row['description'] ?? $row['number'] ?? $row['port_number'] ?? ''));
         $connectedPortId = trim((string) ($row['connected_port_id'] ?? $row['conn_port_id'] ?? $row['port_connection_id'] ?? $connectedPort['id'] ?? ''));
         $connectedItemId = trim((string) ($row['connected_item_id'] ?? $row['conn_item_id'] ?? $row['connection_item_id'] ?? $connectedItem['id'] ?? ''));
         $connectedPortLabel = trim((string) ($row['connected_port_label'] ?? $row['connected_port_name'] ?? $row['connected_port_description'] ?? $row['connected_port_number'] ?? $connectedPort['label'] ?? ''));
+        $connectedItemLabel = trim((string) ($row['connected_item_label'] ?? $row['connected_item_name'] ?? $row['connected_item_description'] ?? $row['connection_item_label'] ?? $row['connection_item_name'] ?? $connectedItem['label'] ?? ''));
+        if ($name === '' || $this->isSimpleNumericLabel($name)) {
+            $name = $this->pickDescriptivePortLabel([
+                $selectedPort['label'] ?? '',
+                $connectedPortLabel,
+                $connectedItemLabel,
+                $this->extractPortLikeLabelFromRow($row),
+            ], $name);
+        }
         if ($connectedPortLabel === '' && isset($row['connected_port']) && is_scalar($row['connected_port'])) {
             $connectedPortLabel = trim((string) $row['connected_port']);
+        }
+        if ($connectedPortLabel === '') {
+            $connectedPortLabel = $this->pickDescriptivePortLabel([
+                $connectedPort['label'] ?? '',
+                $selectedPort['label'] ?? '',
+                $this->extractPortLikeLabelFromRow($row),
+            ]);
+        }
+        if ($connectedItemLabel === '' && isset($row['connected_item']) && is_scalar($row['connected_item'])) {
+            $connectedItemLabel = trim((string) $row['connected_item']);
         }
         if ($connectedPortLabel !== '' && $connectedPortId !== '' && !str_contains($connectedPortLabel, '#' . $connectedPortId)) {
             $connectedPortLabel = '#' . $connectedPortId . ' ' . $connectedPortLabel;
         } elseif ($connectedPortLabel === '' && $connectedPortId !== '') {
             $connectedPortLabel = '#' . $connectedPortId;
+        }
+        if ($connectedItemLabel !== '' && $connectedItemId !== '' && !str_contains($connectedItemLabel, '#' . $connectedItemId)) {
+            $connectedItemLabel = '#' . $connectedItemId . ' ' . $connectedItemLabel;
+        } elseif ($connectedItemLabel === '' && $connectedItemId !== '') {
+            $connectedItemLabel = '#' . $connectedItemId;
         }
         if ($name === '' && $portId !== '') {
             $name = '#' . $portId;
@@ -3662,8 +3717,8 @@ final class AdminController
 
         $trafficTotal = $this->extractTrafficTotal($row);
         $statusParts = [
-            is_string($row['status'] ?? null) ? strtolower(trim((string) ($row['status'] ?? ''))) : '',
-            is_string($row['state'] ?? null) ? strtolower(trim((string) ($row['state'] ?? ''))) : '',
+            is_scalar($row['status'] ?? null) ? strtolower(trim((string) ($row['status'] ?? ''))) : '',
+            is_scalar($row['state'] ?? null) ? strtolower(trim((string) ($row['state'] ?? ''))) : '',
             strtolower(trim((string) ($row['admin_state'] ?? $row['adminState'] ?? ''))),
             strtolower(trim((string) ($row['oper_state'] ?? $row['operState'] ?? ''))),
             strtolower(trim((string) ($selectedPort['state'] ?? ''))),
@@ -3676,6 +3731,17 @@ final class AdminController
             $state = 'down';
         } elseif ($status !== '' && preg_match('/up|active|enabled|online|accepted|connected|link.?up|running/i', $status)) {
             $state = 'up';
+        }
+        if ($state === 'unknown') {
+            $numericStatus = $row['status'] ?? $row['admin_state'] ?? $row['oper_state'] ?? null;
+            if (is_numeric($numericStatus)) {
+                $statusInt = (int) $numericStatus;
+                if ($statusInt > 0) {
+                    $state = 'up';
+                } elseif ($statusInt === 0) {
+                    $state = 'down';
+                }
+            }
         }
 
         $upRaw = $row['is_up'] ?? $row['up'] ?? $row['link_up'] ?? null;
@@ -3721,6 +3787,7 @@ final class AdminController
             'connected_item_id' => $connectedItemId,
             'connected_port_id' => $connectedPortId,
             'connected_port_label' => $connectedPortLabel,
+            'connected_item_label' => $connectedItemLabel,
         ];
     }
 
@@ -3733,7 +3800,7 @@ final class AdminController
 
         if (is_array($value)) {
             $id = trim((string) ($value['id'] ?? $value['port_id'] ?? $value['item_id'] ?? $value['related_id'] ?? ''));
-            $label = trim((string) ($value['name'] ?? $value['label'] ?? $value['user_label'] ?? $value['description'] ?? $value['number'] ?? $value['port'] ?? $value['title'] ?? ''));
+            $label = trim((string) ($value['name'] ?? $value['label'] ?? $value['port_name'] ?? $value['interface_name'] ?? $value['if_name'] ?? $value['ifname'] ?? $value['display_name'] ?? $value['user_label'] ?? $value['description'] ?? $value['number'] ?? $value['port'] ?? $value['title'] ?? ''));
             $state = trim((string) ($value['status'] ?? $value['state'] ?? $value['admin_state'] ?? $value['oper_state'] ?? ''));
             $speed = $this->normalizePortSpeedValue($value['speed'] ?? $value['speed_label'] ?? $value['speed_human'] ?? $value['bandwidth'] ?? $value['port_speed'] ?? null);
             if ($id === '' && $label !== '' && preg_match('/#\\s*(\\d+)/', $label, $m)) {
@@ -4172,9 +4239,26 @@ final class AdminController
     private function resolvePortDisplayName(array $row): string
     {
         $connected = trim((string) ($row['connected_port_label'] ?? ''));
+        $connectedItem = trim((string) ($row['connected_item_label'] ?? ''));
         $name = trim((string) ($row['name'] ?? ''));
         $connectedId = trim((string) ($row['connected_port_id'] ?? ''));
+        $connectedItemId = trim((string) ($row['connected_item_id'] ?? ''));
         $portId = trim((string) ($row['port_id'] ?? ''));
+
+        $descriptiveParts = [];
+        foreach ([$name, $connected, $connectedItem] as $candidate) {
+            if ($candidate === '' || $this->isSimpleNumericLabel($candidate)) {
+                continue;
+            }
+            if (!in_array($candidate, $descriptiveParts, true)) {
+                $descriptiveParts[] = $candidate;
+            }
+        }
+        if (!empty($descriptiveParts)) {
+            return count($descriptiveParts) > 1
+                ? ($descriptiveParts[0] . ' -> ' . $descriptiveParts[1])
+                : $descriptiveParts[0];
+        }
 
         if ($connected !== '' && !$this->isSimpleNumericLabel($connected)) {
             if ($name !== '' && !$this->isSimpleNumericLabel($name) && strcasecmp($name, $connected) !== 0) {
@@ -4193,6 +4277,12 @@ final class AdminController
         }
         if ($connected !== '') {
             return $connected;
+        }
+        if ($connectedItemId !== '') {
+            return '#' . $connectedItemId;
+        }
+        if ($connectedItem !== '') {
+            return $connectedItem;
         }
         if ($name !== '') {
             return $name;
@@ -4215,61 +4305,184 @@ final class AdminController
         return false;
     }
 
+    private function pickDescriptivePortLabel(array $candidates, string $fallback = ''): string
+    {
+        foreach ($candidates as $candidate) {
+            $text = trim((string) $candidate);
+            if ($text === '' || $this->isSimpleNumericLabel($text)) {
+                continue;
+            }
+            if ($this->isUsefulPortLabel($text)) {
+                return $text;
+            }
+        }
+        return trim($fallback);
+    }
+
+    private function isUsefulPortLabel(string $value): bool
+    {
+        $v = trim($value);
+        if ($v === '' || $this->isSimpleNumericLabel($v)) {
+            return false;
+        }
+        $lower = strtolower($v);
+        if (in_array($lower, ['accepted', 'pending', 'rejected', 'active', 'inactive', 'enabled', 'disabled', 'up', 'down', 'unknown'], true)) {
+            return false;
+        }
+        if (preg_match('/(ethernet|gig|sfp|switch|router|interface|uplink|port|eth\\d|gi\\d|te\\d|lan|wan)/i', $v)) {
+            return true;
+        }
+        if (preg_match('/#\\s*\\d+\\s+/', $v)) {
+            return true;
+        }
+        return strlen($v) >= 6 && preg_match('/[a-z]/i', $v) && preg_match('/\\d/', $v);
+    }
+
+    private function extractPortLikeLabelFromRow(array $row): string
+    {
+        $stack = [$row];
+        $visited = 0;
+        while (!empty($stack) && $visited < 200) {
+            $node = array_pop($stack);
+            $visited++;
+            if (!is_array($node)) {
+                continue;
+            }
+            foreach ($node as $key => $value) {
+                if (is_array($value)) {
+                    $stack[] = $value;
+                    continue;
+                }
+                if (!is_scalar($value)) {
+                    continue;
+                }
+                $keyName = strtolower((string) $key);
+                if (!preg_match('/name|label|description|port|interface|ethernet|connection|uplink|title|number|if_/', $keyName)) {
+                    continue;
+                }
+                $text = trim((string) $value);
+                if ($this->isUsefulPortLabel($text)) {
+                    return $text;
+                }
+            }
+        }
+        return '';
+    }
+
     private function normalizePortSpeedValue($raw): string
     {
         if ($raw === null) {
             return '';
         }
-        if (is_numeric($raw)) {
-            $n = (float) $raw;
-            if ($n <= 0) {
-                return '';
-            }
-            if ($n >= 1000) {
-                $g = $n / 1000;
-                $text = abs($g - round($g)) < 0.01 ? (string) (int) round($g) : number_format($g, 1, '.', '');
-                return $text . 'G';
-            }
-            return number_format($n, 0, '.', '') . 'M';
+        if (is_bool($raw)) {
+            return '';
         }
-
         $text = strtolower(trim((string) $raw));
         if ($text === '') {
             return '';
         }
-        $text = str_replace(['gbps', 'gbit/s', 'gbit', 'mbps', 'mbit/s', 'mbit'], ['g', 'g', 'g', 'm', 'm', 'm'], $text);
-        if (preg_match('/(\\d+(?:\\.\\d+)?)\\s*g/', $text, $m)) {
-            $n = (float) $m[1];
-            $val = abs($n - round($n)) < 0.01 ? (string) (int) round($n) : number_format($n, 1, '.', '');
-            return $val . 'G';
+        $normalized = str_replace(
+            ['gbps', 'gbit/s', 'gbit', 'gigabit', 'tbps', 'tbit/s', 'tbit', 'mbps', 'mbit/s', 'mbit', 'kbps', 'kbit/s', 'kbit'],
+            ['g', 'g', 'g', 'g', 't', 't', 't', 'm', 'm', 'm', 'k', 'k', 'k'],
+            $text
+        );
+        $normalized = str_replace([',', ' ', "\t", "\n", "\r"], '', $normalized);
+        if (!preg_match('/(-?\\d+(?:\\.\\d+)?)([tgmk])?/', $normalized, $match)) {
+            return '';
         }
-        if (preg_match('/(\\d+(?:\\.\\d+)?)\\s*m/', $text, $m)) {
-            $n = (float) $m[1];
-            if ($n >= 1000) {
-                $g = $n / 1000;
-                $val = abs($g - round($g)) < 0.01 ? (string) (int) round($g) : number_format($g, 1, '.', '');
-                return $val . 'G';
-            }
-            return number_format($n, 0, '.', '') . 'M';
+        $value = (float) ($match[1] ?? 0);
+        $unit = strtolower((string) ($match[2] ?? ''));
+        if ($value <= 0) {
+            return '';
         }
-        if (preg_match('/\\b10g\\b/', $text)) {
-            return '10G';
-        }
-        if (preg_match('/\\b1g\\b/', $text)) {
-            return '1G';
-        }
-        if (preg_match('/\\b10000\\b/', $text)) {
-            return '10G';
-        }
-        if (preg_match('/\\b1000\\b/', $text)) {
-            return '1G';
-        }
-        return '';
+        $mbps = $this->normalizeSpeedToPlausibleMbps($value, $unit);
+        return $this->formatPlausibleSpeed($mbps);
     }
 
     private function extractSpeedFromText(string $text): string
     {
         return $this->normalizePortSpeedValue($text);
+    }
+
+    private function normalizeSpeedToPlausibleMbps(float $value, string $unit): float
+    {
+        $candidates = [];
+        switch ($unit) {
+            case 't':
+                $candidates = [$value * 1000000];
+                break;
+            case 'g':
+                $candidates = [$value * 1000, $value, $value / 1000, $value / 1000000];
+                break;
+            case 'm':
+                $candidates = [$value, $value * 1000, $value / 1000];
+                break;
+            case 'k':
+                $candidates = [$value / 1000, $value, $value / 1000000];
+                break;
+            default:
+                $candidates = [$value, $value / 1000, $value / 1000000, $value * 1000];
+                break;
+        }
+
+        $standards = [10, 100, 1000, 2500, 5000, 10000, 25000, 40000, 50000, 100000, 200000, 400000, 800000];
+        $best = 0.0;
+        $bestScore = INF;
+        foreach (array_values($candidates) as $idx => $candidate) {
+            $candidate = (float) $candidate;
+            if ($candidate <= 0) {
+                continue;
+            }
+            $nearest = $standards[0];
+            $delta = INF;
+            foreach ($standards as $std) {
+                $d = abs($candidate - $std) / $std;
+                if ($d < $delta) {
+                    $delta = $d;
+                    $nearest = $std;
+                }
+            }
+            $score = $delta + ($idx * 0.08);
+            if ($candidate < 1) {
+                $score += 1.5;
+            }
+            if ($candidate > 1200000) {
+                $score += 1.5;
+            }
+            if ($score < $bestScore) {
+                $bestScore = $score;
+                $best = (float) $nearest;
+            }
+        }
+
+        if ($best > 0) {
+            return $best;
+        }
+        foreach ($candidates as $candidate) {
+            $candidate = (float) $candidate;
+            if ($candidate > 0) {
+                return $candidate;
+            }
+        }
+        return 0.0;
+    }
+
+    private function formatPlausibleSpeed(float $mbps): string
+    {
+        if ($mbps <= 0) {
+            return '';
+        }
+        if ($mbps >= 1000) {
+            $g = $mbps / 1000;
+            if (abs($g - round($g)) < 0.01) {
+                return (string) (int) round($g) . 'G';
+            }
+            return rtrim(rtrim(number_format($g, 1, '.', ''), '0'), '.') . 'G';
+        }
+        if (abs($mbps - round($mbps)) < 0.01) {
+            return (string) (int) round($mbps) . 'M';
+        }
+        return rtrim(rtrim(number_format($mbps, 1, '.', ''), '0'), '.') . 'M';
     }
 
     private function enrichPortRowsWithPortDetails(EasyDcimClient $client, array $rows): array
@@ -4296,11 +4509,15 @@ final class AdminController
             }
 
             $currentConnected = trim((string) ($rows[$idx]['connected_port_label'] ?? ''));
+            $currentConnectedItem = trim((string) ($rows[$idx]['connected_item_label'] ?? ''));
             $currentName = trim((string) ($rows[$idx]['name'] ?? ''));
             $detailLabel = trim((string) ($detail['label'] ?? ''));
             if ($detailLabel !== '') {
                 if ($currentConnected === '' || $this->isSimpleNumericLabel($currentConnected)) {
                     $rows[$idx]['connected_port_label'] = $detailLabel;
+                }
+                if ($currentConnectedItem === '' || $this->isSimpleNumericLabel($currentConnectedItem)) {
+                    $rows[$idx]['connected_item_label'] = $detailLabel;
                 }
                 if ($currentName === '' || $this->isSimpleNumericLabel($currentName)) {
                     $rows[$idx]['name'] = $detailLabel;
@@ -4551,6 +4768,7 @@ final class AdminController
             'servers_api_loaded' => 'تعداد آیتم دریافتی از EasyDCIM',
             'servers_api_empty_hint' => 'لیست API خالی است. اگر توکن ادمین استفاده می‌کنید، حالت Unrestricted را روشن کنید یا Service/Order/Server ID را در سرویس‌های WHMCS تکمیل کنید.',
             'servers_assigned' => 'سرویس‌های واگذار شده به مشتری',
+            'servers_traffic_hint' => 'این جدول برای مانیتور پهنای‌باند است. برای گزارش کامل مصرف، تب «ترافیک» را هم بررسی کنید.',
             'servers_unassigned' => 'سرویس‌های آزاد (بدون اتصال به WHMCS)',
             'test' => 'تست',
             'mode' => 'روش',
@@ -4767,6 +4985,7 @@ final class AdminController
             'servers_api_loaded' => 'Items loaded from EasyDCIM',
             'servers_api_empty_hint' => 'API list is empty. If you use an admin token, enable Unrestricted mode or fill Service/Order/Server IDs on WHMCS services.',
             'servers_assigned' => 'Assigned Services (WHMCS mapped)',
+            'servers_traffic_hint' => 'This view is bandwidth-focused. For full usage history, open the Traffic tab.',
             'servers_unassigned' => 'Unassigned Services (not mapped to WHMCS)',
             'test' => 'Test',
             'mode' => 'Mode',

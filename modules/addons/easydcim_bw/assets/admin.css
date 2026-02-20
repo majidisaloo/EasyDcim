@@ -353,6 +353,57 @@
   font-size: 12px;
 }
 
+.edbw-traffic-num {
+  display: inline-block;
+  min-width: 72px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.edbw-detail-toggle {
+  display: inline-block;
+  text-align: left;
+  max-width: 320px;
+}
+
+.edbw-wrap.edbw-fa .edbw-detail-toggle {
+  text-align: right;
+}
+
+.edbw-detail-toggle summary {
+  cursor: pointer;
+  color: #1d4ed8;
+  font-weight: 600;
+  outline: none;
+}
+
+.edbw-detail-list {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fbff;
+  min-width: 240px;
+}
+
+.edbw-detail-list dt {
+  margin: 0;
+  font-size: 11px;
+  color: #475569;
+  font-weight: 700;
+}
+
+.edbw-detail-list dd {
+  margin: 0 0 6px;
+  color: #0f172a;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.edbw-detail-list dd:last-child {
+  margin-bottom: 0;
+}
+
 @media (max-width: 900px) {
   .edbw-form-inline label {
     min-width: 100%;

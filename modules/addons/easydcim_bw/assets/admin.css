@@ -233,6 +233,19 @@
   font-size: 12px;
 }
 
+.edbw-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.edbw-pager-label {
+  font-size: 13px;
+  color: #334155;
+  font-weight: 600;
+}
+
 .edbw-table-wrap {
   overflow-x: auto;
   background: #ffffff;

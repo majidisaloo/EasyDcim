@@ -316,6 +316,7 @@ final class AdminController
         $releaseSourceStateRaw = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_source_status')->value('meta_value');
         $releaseSourceState = $releaseSourceStateRaw === 'ok' ? 'ok' : ($releaseSourceStateRaw === 'error' ? 'error' : 'neutral');
         $releaseVersion = ltrim($releaseTag, 'vV');
+        $isBehindLatest = $releaseTag !== '' && $this->compareVersion($releaseVersion, (string) $version['module_version']) > 0;
         if ($releaseTag !== '' && $this->compareVersion($releaseVersion, (string) $version['module_version']) <= 0) {
             $releaseAvailable = false;
         }
@@ -329,13 +330,14 @@ final class AdminController
             $releaseSourceState,
             '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>'
         );
-        $this->renderMetricCard($this->t('m_update_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
+        $this->renderMetricCard($this->t('m_update_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
         $apiFailUrl = $this->buildTabUrl('logs', ['logs_only_errors' => '1', 'logs_level' => 'ERROR']);
         $this->renderMetricCardLink($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>', $apiFailUrl);
         $this->renderMetricCard($this->t('m_update_lock'), $updateLock ? $this->t('m_locked') : $this->t('m_free'), $updateLock ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 1110 0v3"></path><rect x="5" y="11" width="14" height="10" rx="2"></rect></svg>');
         $this->renderMetricCard($this->t('m_connection'), $connectionState['text'], $connectionState['state'], '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0M8 12a4 4 0 018 0"></path><circle cx="12" cy="16" r="1"></circle></svg>');
 
-        $this->renderMetricCard($this->t('m_latest_release'), $releaseTag !== '' ? $releaseTag : $this->t('m_unknown'), $releaseTag !== '' ? 'ok' : 'neutral', '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"></path></svg>');
+        $latestReleaseState = $releaseTag === '' ? 'neutral' : ($isBehindLatest ? 'warn' : 'ok');
+        $this->renderMetricCard($this->t('m_latest_release'), $releaseTag !== '' ? $releaseTag : $this->t('m_unknown'), $latestReleaseState, '<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"></path></svg>');
         echo '</div>';
 
         echo '<div class="edbw-panel">';
@@ -577,6 +579,9 @@ final class AdminController
         $easyServices = $this->getEasyServicesCacheOnly();
         $services = $this->getScopedHostingServices($easyServices, false, false);
         $search = trim((string) ($_REQUEST['servers_q'] ?? ''));
+        $serversPerPage = $this->getPerPage('servers_per_page', 10);
+        $assignedPage = $this->getPage('servers_page_assigned');
+        $unassignedPage = $this->getPage('servers_page_unassigned');
 
         $explicitMappedServiceIds = $this->getExplicitMappedEasyServiceIdsForScope();
         $unassigned = $this->buildUnassignedEasyServices($easyServices, $explicitMappedServiceIds);
@@ -727,6 +732,12 @@ final class AdminController
         echo '<form method="get" class="edbw-form-inline edbw-search-form" action="' . htmlspecialchars($this->buildTabUrl('servers', ['servers_q' => '', 'traffic_q' => '', 'focus_serviceid' => ''])) . '">';
         echo '<label>' . htmlspecialchars($this->t('search')) . '</label>';
         echo '<input type="text" name="servers_q" value="' . htmlspecialchars($search) . '" placeholder="' . htmlspecialchars($this->t('servers_search_placeholder')) . '">';
+        echo '<label>' . htmlspecialchars($this->t('rows_per_page')) . '</label>';
+        echo '<select name="servers_per_page">';
+        foreach ([10, 25, 50, 100] as $size) {
+            echo '<option value="' . $size . '"' . ($serversPerPage === $size ? ' selected' : '') . '>' . $size . '</option>';
+        }
+        echo '</select>';
         echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('search')) . '</button>';
         if ($search !== '') {
             echo '<a class="btn btn-default" href="' . htmlspecialchars($this->buildTabUrl('servers', ['servers_q' => '', 'traffic_q' => '', 'focus_serviceid' => ''])) . '">' . htmlspecialchars($this->t('clear_search')) . '</a>';
@@ -734,11 +745,20 @@ final class AdminController
         echo '</form>';
         echo '</div>';
 
+        $servicesTotal = count($services);
+        $servicesPages = max(1, (int) ceil($servicesTotal / $serversPerPage));
+        $assignedPage = min(max(1, $assignedPage), $servicesPages);
+        $servicesForPage = array_slice($services, ($assignedPage - 1) * $serversPerPage, $serversPerPage);
+        $unassignedTotal = count($unassigned);
+        $unassignedPages = max(1, (int) ceil($unassignedTotal / $serversPerPage));
+        $unassignedPage = min(max(1, $unassignedPage), $unassignedPages);
+        $unassignedForPage = array_slice($unassigned, ($unassignedPage - 1) * $serversPerPage, $serversPerPage);
+
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
         echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_traffic_hint')) . '</p>';
         echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>' . htmlspecialchars($this->t('connected_switches')) . '</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('details')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
-        foreach ($services as $svc) {
+        foreach ($servicesForPage as $svc) {
             $testCache = $this->getServiceTestCache((int) $svc['serviceid']);
             $portsHtml = $this->renderPortStatusHtml($svc, $testCache);
             $lastCheck = trim((string) ($svc['last_check_at'] ?? ''));
@@ -834,16 +854,21 @@ final class AdminController
             echo '<td><form method="post" class="edbw-form-inline" style="margin:0;padding:0;border:0;background:none"><input type="hidden" name="tab" value="servers"><input type="hidden" name="action" value="test_service_item"><input type="hidden" name="test_serviceid" value="' . (int) $svc['serviceid'] . '"><button type="submit" class="btn btn-default btn-xs">' . htmlspecialchars($this->t('test')) . '</button></form></td>';
             echo '</tr>';
         }
-        if (empty($services)) {
+        if (empty($servicesForPage)) {
             echo '<tr><td colspan="7">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
+        $this->renderPager('servers', 'servers_page_assigned', $assignedPage, $servicesPages, [
+            'servers_q' => $search,
+            'servers_per_page' => (string) $serversPerPage,
+            'servers_page_unassigned' => (string) $unassignedPage,
+        ]);
         echo '</div>';
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_unassigned')) . '</h3>';
         echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>EasyDCIM Service ID</th><th>Server/Device ID</th><th>IP</th><th>iLO IP</th><th>Label</th><th>' . htmlspecialchars($this->t('order_id')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th></tr></thead><tbody>';
-        foreach ($unassigned as $item) {
+        foreach ($unassignedForPage as $item) {
             echo '<tr>';
             echo '<td>' . htmlspecialchars((string) ($item['service_id'] ?? '-')) . '</td>';
             echo '<td>' . htmlspecialchars((string) ($item['server_id'] ?? '-')) . '</td>';
@@ -854,10 +879,15 @@ final class AdminController
             echo '<td>' . htmlspecialchars((string) ($item['status'] ?? '-')) . '</td>';
             echo '</tr>';
         }
-        if (empty($unassigned)) {
+        if (empty($unassignedForPage)) {
             echo '<tr><td colspan="7">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
+        $this->renderPager('servers', 'servers_page_unassigned', $unassignedPage, $unassignedPages, [
+            'servers_q' => $search,
+            'servers_per_page' => (string) $serversPerPage,
+            'servers_page_assigned' => (string) $assignedPage,
+        ]);
         echo '</div>';
     }
 
@@ -1169,10 +1199,12 @@ final class AdminController
         $logsSource = trim((string) ($_REQUEST['logs_source'] ?? ''));
         $logsLevel = strtoupper(trim((string) ($_REQUEST['logs_level'] ?? '')));
         $logsOnlyErrors = ((string) ($_REQUEST['logs_only_errors'] ?? '') === '1');
+        $logsPerPage = $this->getPerPage('logs_per_page', 10);
+        $logsPage = $this->getPage('logs_page');
         echo '<div class="edbw-panel">';
         echo '<h3>System Logs</h3>';
         echo '<p class="edbw-help">Retention is set to ' . $retention . ' day(s). Logs older than this are auto-cleaned in cron.</p>';
-        echo '<form method="get" class="edbw-form-inline edbw-search-form" action="' . htmlspecialchars($this->buildTabUrl('logs', ['logs_q' => '', 'logs_source' => '', 'logs_level' => '', 'logs_only_errors' => ''])) . '">';
+        echo '<form method="get" class="edbw-form-inline edbw-search-form" action="' . htmlspecialchars($this->buildTabUrl('logs', ['logs_q' => '', 'logs_source' => '', 'logs_level' => '', 'logs_only_errors' => '', 'logs_page' => '', 'logs_per_page' => ''])) . '">';
         echo '<label>' . htmlspecialchars($this->t('search')) . '</label>';
         echo '<input type="text" name="logs_q" value="' . htmlspecialchars($logsQ) . '" placeholder="' . htmlspecialchars($this->t('logs_search_placeholder')) . '">';
         echo '<label>Level</label>';
@@ -1184,11 +1216,17 @@ final class AdminController
         echo '</select>';
         echo '<label>Source</label>';
         echo '<input type="text" name="logs_source" value="' . htmlspecialchars($logsSource) . '" placeholder="system / easydcim_api_call ...">';
+        echo '<label>' . htmlspecialchars($this->t('rows_per_page')) . '</label>';
+        echo '<select name="logs_per_page">';
+        foreach ([10, 25, 50, 100] as $size) {
+            echo '<option value="' . $size . '"' . ($logsPerPage === $size ? ' selected' : '') . '>' . $size . '</option>';
+        }
+        echo '</select>';
         echo '<label>' . htmlspecialchars($this->t('logs_only_errors')) . '</label>';
         echo '<input type="checkbox" name="logs_only_errors" value="1"' . ($logsOnlyErrors ? ' checked' : '') . '>';
         echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('search')) . '</button>';
         if ($logsQ !== '' || $logsSource !== '' || $logsLevel !== '' || $logsOnlyErrors) {
-            echo '<a class="btn btn-default" href="' . htmlspecialchars($this->buildTabUrl('logs', ['logs_q' => '', 'logs_source' => '', 'logs_level' => '', 'logs_only_errors' => ''])) . '">' . htmlspecialchars($this->t('clear_search')) . '</a>';
+            echo '<a class="btn btn-default" href="' . htmlspecialchars($this->buildTabUrl('logs', ['logs_q' => '', 'logs_source' => '', 'logs_level' => '', 'logs_only_errors' => '', 'logs_page' => '', 'logs_per_page' => ''])) . '">' . htmlspecialchars($this->t('clear_search')) . '</a>';
         }
         echo '</form>';
         echo '<div class="edbw-server-actions">';
@@ -1204,12 +1242,13 @@ final class AdminController
         echo '</form>';
         echo '</div>';
 
-        $logs = $this->getSystemLogs(500, [
+        $logsPaged = $this->getSystemLogsPaged($logsPage, $logsPerPage, [
             'q' => $logsQ,
             'source' => $logsSource,
             'level' => $logsLevel,
             'only_errors' => $logsOnlyErrors,
         ]);
+        $logs = $logsPaged['rows'];
         echo '<div class="edbw-table-wrap">';
         echo '<table class="table table-striped"><thead><tr><th>Level</th><th>Message</th><th>Source</th><th>Details</th><th>Time</th></tr></thead><tbody>';
         foreach ($logs as $log) {
@@ -1225,8 +1264,18 @@ final class AdminController
             echo '<td>' . htmlspecialchars((string) $log['created_at']) . '</td>';
             echo '</tr>';
         }
+        if (empty($logs)) {
+            echo '<tr><td colspan="5">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+        }
         echo '</tbody></table>';
         echo '</div>';
+        $this->renderPager('logs', 'logs_page', (int) $logsPaged['page'], (int) $logsPaged['pages'], [
+            'logs_q' => $logsQ,
+            'logs_source' => $logsSource,
+            'logs_level' => $logsLevel,
+            'logs_only_errors' => $logsOnlyErrors ? '1' : '',
+            'logs_per_page' => (string) $logsPerPage,
+        ]);
         echo '</div>';
 
         echo '<div class="edbw-panel">';
@@ -2930,28 +2979,57 @@ final class AdminController
 
     private function getSystemLogs(int $limit = 400, array $filters = []): array
     {
+        return $this->buildSystemLogsQuery($filters)
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get()
+            ->map(static fn ($r): array => (array) $r)
+            ->all();
+    }
+
+    private function getSystemLogsPaged(int $page, int $perPage, array $filters = []): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, $perPage);
+        $query = $this->buildSystemLogsQuery($filters);
+        $total = (int) $query->count();
+        $pages = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $pages);
+        $rows = $query->orderByDesc('id')
+            ->offset(($page - 1) * $perPage)
+            ->limit($perPage)
+            ->get()
+            ->map(static fn ($r): array => (array) $r)
+            ->all();
+        return [
+            'rows' => $rows,
+            'total' => $total,
+            'page' => $page,
+            'pages' => $pages,
+            'per_page' => $perPage,
+        ];
+    }
+
+    private function buildSystemLogsQuery(array $filters = [])
+    {
         $qText = trim((string) ($filters['q'] ?? ''));
         $source = trim((string) ($filters['source'] ?? ''));
         $level = strtoupper(trim((string) ($filters['level'] ?? '')));
         $onlyErrors = !empty($filters['only_errors']);
 
         $query = Capsule::table('mod_easydcim_bw_guard_logs');
-
         if ($onlyErrors) {
             $query->where(function ($sub): void {
                 $sub->where('level', 'ERROR')
                     ->orWhere('level', 'WARNING');
             });
         }
-
         if (in_array($level, ['INFO', 'WARNING', 'ERROR'], true)) {
             $query->where('level', $level);
         }
-
         if ($source !== '') {
             $query->where('source', 'LIKE', '%' . $source . '%');
         }
-
         if ($qText !== '') {
             $like = '%' . $qText . '%';
             $query->where(function ($sub) use ($like): void {
@@ -2962,12 +3040,45 @@ final class AdminController
                     ->orWhere('created_at', 'LIKE', $like);
             });
         }
+        return $query;
+    }
 
-        return $query->orderByDesc('id')
-            ->limit($limit)
-            ->get()
-            ->map(static fn ($r): array => (array) $r)
-            ->all();
+    private function getPerPage(string $key, int $default = 10): int
+    {
+        $allowed = [10, 25, 50, 100];
+        $value = (int) ($_REQUEST[$key] ?? $default);
+        if (!in_array($value, $allowed, true)) {
+            return $default;
+        }
+        return $value;
+    }
+
+    private function getPage(string $key): int
+    {
+        return max(1, (int) ($_REQUEST[$key] ?? 1));
+    }
+
+    private function renderPager(string $tab, string $pageKey, int $page, int $pages, array $extra = []): void
+    {
+        if ($pages <= 1) {
+            return;
+        }
+        $page = max(1, min($page, $pages));
+        $prevUrl = $page > 1 ? $this->buildTabUrl($tab, array_merge($extra, [$pageKey => (string) ($page - 1)])) : '';
+        $nextUrl = $page < $pages ? $this->buildTabUrl($tab, array_merge($extra, [$pageKey => (string) ($page + 1)])) : '';
+        echo '<div class="edbw-pager">';
+        if ($prevUrl !== '') {
+            echo '<a class="btn btn-default btn-sm" href="' . htmlspecialchars($prevUrl) . '">' . htmlspecialchars($this->t('pager_prev')) . '</a>';
+        } else {
+            echo '<span class="btn btn-default btn-sm disabled">' . htmlspecialchars($this->t('pager_prev')) . '</span>';
+        }
+        echo '<span class="edbw-pager-label">' . htmlspecialchars($this->t('pager_page')) . ' ' . $page . ' / ' . $pages . '</span>';
+        if ($nextUrl !== '') {
+            echo '<a class="btn btn-default btn-sm" href="' . htmlspecialchars($nextUrl) . '">' . htmlspecialchars($this->t('pager_next')) . '</a>';
+        } else {
+            echo '<span class="btn btn-default btn-sm disabled">' . htmlspecialchars($this->t('pager_next')) . '</span>';
+        }
+        echo '</div>';
     }
 
     private function json(array $data): void
@@ -3088,7 +3199,18 @@ final class AdminController
             return;
         }
         if (!empty($gids)) {
-            $query->whereIn('p.gid', $gids);
+            $gidPids = Capsule::table('tblproducts')
+                ->whereIn('gid', $gids)
+                ->pluck('id')
+                ->map(static function ($v): int {
+                    return (int) $v;
+                })
+                ->all();
+            if (empty($gidPids)) {
+                $query->whereRaw('1=0');
+                return;
+            }
+            $query->whereIn('h.packageid', $gidPids);
         }
     }
 
@@ -5393,6 +5515,10 @@ final class AdminController
             'servers_unassigned' => 'سرویس‌های آزاد (بدون اتصال به WHMCS)',
             'search' => 'جستجو',
             'clear_search' => 'پاک کردن',
+            'rows_per_page' => 'تعداد در صفحه',
+            'pager_prev' => 'قبلی',
+            'pager_next' => 'بعدی',
+            'pager_page' => 'صفحه',
             'servers_search_placeholder' => 'جستجو: IP, iLO, Label/MDP, نام، ایمیل، Service/Order/Server ID',
             'traffic_search_placeholder' => 'جستجو: IP, iLO, Label/MDP, نام، ایمیل، Service/Order/Server ID',
             'logs_search_placeholder' => 'جستجو در پیام/سورس/جزئیات JSON/تاریخ/شناسه سرویس',
@@ -5626,6 +5752,10 @@ final class AdminController
             'servers_unassigned' => 'Unassigned Services (not mapped to WHMCS)',
             'search' => 'Search',
             'clear_search' => 'Clear',
+            'rows_per_page' => 'Rows per page',
+            'pager_prev' => 'Prev',
+            'pager_next' => 'Next',
+            'pager_page' => 'Page',
             'servers_search_placeholder' => 'Search by IP, iLO, Label/MDP, name, email, Service/Order/Server ID',
             'traffic_search_placeholder' => 'Search by IP, iLO, Label/MDP, name, email, Service/Order/Server ID',
             'logs_search_placeholder' => 'Search message/source/JSON details/date/service id',

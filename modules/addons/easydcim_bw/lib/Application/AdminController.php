@@ -771,10 +771,36 @@ final class AdminController
             ];
             $clientHtml = '<a href="' . htmlspecialchars((string) $svc['client_url']) . '">' . htmlspecialchars((string) $svc['client_name']) . '</a>';
             $domain = trim((string) ($svc['domain'] ?? ''));
+            $easyItem = [];
+            $svcEasyId = trim((string) ($svc['easydcim_service_id'] ?? ''));
+            $svcOrderId = trim((string) ($svc['easydcim_order_id'] ?? ''));
+            $svcServerId = trim((string) ($svc['easydcim_server_id'] ?? ''));
+            $svcIp = trim((string) ($svc['ip'] ?? ''));
+            if ($svcEasyId !== '' && isset($easyByService[$svcEasyId])) {
+                $easyItem = $easyByService[$svcEasyId];
+            } elseif ($svcOrderId !== '' && isset($easyByOrder[$svcOrderId])) {
+                $easyItem = $easyByOrder[$svcOrderId];
+            } elseif ($svcServerId !== '' && isset($easyByServer[$svcServerId])) {
+                $easyItem = $easyByServer[$svcServerId];
+            } elseif ($svcIp !== '' && isset($easyByIp[$svcIp])) {
+                $easyItem = $easyByIp[$svcIp];
+            }
+            $publicIp = trim((string) ($svc['ip'] ?? ''));
+            $iloIp = trim((string) ($easyItem['ilo_ip'] ?? ''));
+            $labelText = trim((string) ($easyItem['label'] ?? ''));
             if ($domain !== '') {
                 $clientHtml .= '<div class="edbw-help">' . htmlspecialchars($domain) . '</div>';
             }
-            $detailHtml = '<details class="edbw-detail-toggle"><summary>' . htmlspecialchars($this->t('details')) . '</summary><dl class="edbw-detail-list">';
+            if ($publicIp !== '') {
+                $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">IP</span><span>' . htmlspecialchars($publicIp) . '</span></div>';
+            }
+            if ($iloIp !== '') {
+                $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">iLO</span><span>' . htmlspecialchars($iloIp) . '</span></div>';
+            }
+            if ($labelText !== '') {
+                $clientHtml .= '<div class="edbw-client-meta"><span class="edbw-client-meta-key">Label</span><span>' . htmlspecialchars($labelText) . '</span></div>';
+            }
+            $detailHtml = '<details class="edbw-detail-toggle"><summary><span class="edbw-detail-pill">' . htmlspecialchars($this->t('details')) . '</span></summary><dl class="edbw-detail-list">';
             foreach ($detailRows as [$label, $value]) {
                 $detailHtml .= '<dt>' . htmlspecialchars((string) $label) . '</dt><dd>' . htmlspecialchars((string) $value) . '</dd>';
             }
@@ -4675,7 +4701,7 @@ final class AdminController
             }
             foreach ($rows as $r) {
                 $stateHint = strtolower(trim((string) ($r['state'] ?? '')));
-                $isUp = !empty($r['is_up']) || in_array($stateHint, ['up', 'idle'], true);
+                $isUp = !empty($r['is_up']) || in_array($stateHint, ['up', 'idle', 'enabled', 'online', 'connected'], true);
                 $traffic = (float) ($r['traffic_total'] ?? 0.0);
                 $stateClass = 'edbw-dot-yellow';
                 $stateText = $this->isFa ? 'نامشخص' : 'Unknown';
@@ -4728,19 +4754,23 @@ final class AdminController
         $connectedItemId = trim((string) ($row['connected_item_id'] ?? ''));
         $portId = trim((string) ($row['port_id'] ?? ''));
 
-        $descriptiveParts = [];
-        foreach ([$name, $connected, $connectedItem] as $candidate) {
-            if ($candidate === '' || $this->isSimpleNumericLabel($candidate)) {
-                continue;
-            }
-            if (!in_array($candidate, $descriptiveParts, true)) {
-                $descriptiveParts[] = $candidate;
-            }
+        $interface = $this->extractInterfaceName($connected);
+        if ($interface !== '') {
+            return $connectedItem !== '' && !$this->isSimpleNumericLabel($connectedItem)
+                ? ($interface . ' @ ' . $connectedItem)
+                : $interface;
         }
-        if (!empty($descriptiveParts)) {
-            return count($descriptiveParts) > 1
-                ? ($descriptiveParts[0] . ' -> ' . $descriptiveParts[1])
-                : $descriptiveParts[0];
+
+        $nameInterface = $this->extractInterfaceName($name);
+        if ($nameInterface !== '') {
+            return $connectedItem !== '' && !$this->isSimpleNumericLabel($connectedItem)
+                ? ($nameInterface . ' @ ' . $connectedItem)
+                : $nameInterface;
+        }
+
+        $descriptive = $this->pickDescriptivePortLabel([$connected, $name, $connectedItem], '');
+        if ($descriptive !== '') {
+            return $descriptive;
         }
 
         if ($connected !== '' && !$this->isSimpleNumericLabel($connected)) {
@@ -4774,6 +4804,21 @@ final class AdminController
             return '#' . $portId;
         }
         return '-';
+    }
+
+    private function extractInterfaceName(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+        if (preg_match('/(Ethernet\\s*[^\\s\\|,;]+|Eth\\s*[^\\s\\|,;]+|Gi\\s*[^\\s\\|,;]+|Te\\s*[^\\s\\|,;]+|Fa\\s*[^\\s\\|,;]+|SFP\\+?\\s*[^\\s\\|,;]+)/i', $text, $m)) {
+            return trim((string) $m[1]);
+        }
+        if (preg_match('/(port\\s*\\d+\\/\\d+(?:\\/\\d+)?)/i', $text, $m)) {
+            return trim((string) $m[1]);
+        }
+        return '';
     }
 
     private function isSimpleNumericLabel(string $value): bool

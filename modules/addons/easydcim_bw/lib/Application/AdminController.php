@@ -461,17 +461,17 @@ final class AdminController
     {
         echo '<div class="edbw-panel">';
         echo '<h3>Traffic Packages</h3>';
-        echo '<form method="post" class="edbw-form-inline">';
+        echo '<form method="post" class="edbw-form-inline edbw-packages-form">';
         echo '<input type="hidden" name="tab" value="packages">';
         echo '<input type="hidden" name="action" value="add_package">';
-        echo '<input type="text" name="pkg_name" placeholder="Package name" required>';
-        echo '<input type="number" step="0.01" min="0.01" name="pkg_size_gb" placeholder="Size GB" required>';
-        echo '<input type="number" step="0.01" min="0" name="pkg_price" placeholder="Price" required>';
-        echo '<button class="btn btn-default" type="submit">Add Package</button>';
+        echo '<div class="edbw-packages-field"><label>Package name</label><input type="text" name="pkg_name" placeholder="Package name" required></div>';
+        echo '<div class="edbw-packages-field"><label>Size GB</label><input type="number" step="0.01" min="0.01" name="pkg_size_gb" placeholder="Size GB" required></div>';
+        echo '<div class="edbw-packages-field"><label>Price</label><input type="number" step="0.01" min="0" name="pkg_price" placeholder="Price" required></div>';
+        echo '<div class="edbw-packages-action"><button class="btn btn-default" type="submit">Add Package</button></div>';
         echo '</form>';
         $packages = Capsule::table('mod_easydcim_bw_guard_packages')->orderBy('id')->limit(100)->get();
         echo '<div class="edbw-table-wrap">';
-        echo '<table class="table table-striped"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th></tr></thead><tbody>';
+        echo '<table class="table table-striped edbw-table-center edbw-packages-table"><thead><tr><th>ID</th><th>Name</th><th>Size GB</th><th>Price</th><th>Active</th></tr></thead><tbody>';
         foreach ($packages as $pkg) {
             echo '<tr>';
             echo '<td>' . (int) $pkg->id . '</td>';

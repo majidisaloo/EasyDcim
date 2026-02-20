@@ -349,6 +349,39 @@
   filter: brightness(1.05);
 }
 
+.edbw-packages-form {
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.edbw-packages-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.edbw-packages-field label {
+  min-width: 0;
+  font-size: 12px;
+  color: #475569;
+  font-weight: 700;
+}
+
+.edbw-packages-action {
+  display: flex;
+  align-items: flex-end;
+}
+
+.edbw-packages-table {
+  table-layout: auto;
+}
+
+.edbw-packages-table th,
+.edbw-packages-table td {
+  white-space: nowrap;
+}
+
 .edbw-port-summary {
   font-weight: 700;
 }

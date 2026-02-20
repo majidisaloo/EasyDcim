@@ -209,6 +209,10 @@
   height: 18px;
 }
 
+.edbw-search-form input[type="text"] {
+  min-width: 360px;
+}
+
 .edbw-help {
   color: #4b5563;
   font-size: 12px;
@@ -454,6 +458,10 @@
   margin: 0 0 4px;
 }
 
+.edbw-row-focus {
+  background: #ecfeff !important;
+}
+
 @media (max-width: 900px) {
   .edbw-form-inline label {
     min-width: 100%;
@@ -466,5 +474,10 @@
   .edbw-table-wrap input[type="number"],
   .edbw-table-wrap select {
     min-width: 90px;
+  }
+
+  .edbw-search-form input[type="text"] {
+    min-width: 100%;
+    width: 100%;
   }
 }

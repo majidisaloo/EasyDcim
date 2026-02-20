@@ -561,9 +561,85 @@ final class AdminController
         $apiAvailable = $baseUrl !== '' && $token !== '';
         $easyServices = $this->getEasyServicesCacheOnly();
         $services = $this->getScopedHostingServices($easyServices, false, false);
+        $search = trim((string) ($_REQUEST['servers_q'] ?? ''));
 
         $explicitMappedServiceIds = $this->getExplicitMappedEasyServiceIdsForScope();
         $unassigned = $this->buildUnassignedEasyServices($easyServices, $explicitMappedServiceIds);
+        $easyByService = [];
+        $easyByOrder = [];
+        $easyByServer = [];
+        $easyByIp = [];
+        foreach ($easyServices as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $sid = trim((string) ($item['service_id'] ?? ''));
+            $ord = trim((string) ($item['order_id'] ?? ''));
+            $srv = trim((string) ($item['server_id'] ?? ''));
+            $ip = trim((string) ($item['ip'] ?? ''));
+            if ($sid !== '' && !isset($easyByService[$sid])) {
+                $easyByService[$sid] = $item;
+            }
+            if ($ord !== '' && !isset($easyByOrder[$ord])) {
+                $easyByOrder[$ord] = $item;
+            }
+            if ($srv !== '' && !isset($easyByServer[$srv])) {
+                $easyByServer[$srv] = $item;
+            }
+            if ($ip !== '' && !isset($easyByIp[$ip])) {
+                $easyByIp[$ip] = $item;
+            }
+        }
+        if ($search !== '') {
+            $services = array_values(array_filter($services, function (array $svc) use ($search, $easyByService, $easyByOrder, $easyByServer, $easyByIp): bool {
+                $easyItem = [];
+                $sid = trim((string) ($svc['easydcim_service_id'] ?? ''));
+                $ord = trim((string) ($svc['easydcim_order_id'] ?? ''));
+                $srv = trim((string) ($svc['easydcim_server_id'] ?? ''));
+                $ip = trim((string) ($svc['ip'] ?? ''));
+                if ($sid !== '' && isset($easyByService[$sid])) {
+                    $easyItem = $easyByService[$sid];
+                } elseif ($ord !== '' && isset($easyByOrder[$ord])) {
+                    $easyItem = $easyByOrder[$ord];
+                } elseif ($srv !== '' && isset($easyByServer[$srv])) {
+                    $easyItem = $easyByServer[$srv];
+                } elseif ($ip !== '' && isset($easyByIp[$ip])) {
+                    $easyItem = $easyByIp[$ip];
+                }
+                return $this->matchesSearchTerm([
+                    (string) ($svc['serviceid'] ?? ''),
+                    (string) ($svc['userid'] ?? ''),
+                    (string) ($svc['pid'] ?? ''),
+                    (string) ($svc['domainstatus'] ?? ''),
+                    (string) ($svc['domain'] ?? ''),
+                    (string) ($svc['client_name'] ?? ''),
+                    (string) ($svc['firstname'] ?? ''),
+                    (string) ($svc['lastname'] ?? ''),
+                    (string) ($svc['email'] ?? ''),
+                    (string) ($svc['ip'] ?? ''),
+                    (string) ($svc['easydcim_service_id'] ?? ''),
+                    (string) ($svc['easydcim_server_id'] ?? ''),
+                    (string) ($svc['easydcim_order_id'] ?? ''),
+                    (string) ($easyItem['label'] ?? ''),
+                    (string) ($easyItem['ilo_ip'] ?? ''),
+                    (string) ($easyItem['client_name'] ?? ''),
+                    (string) ($easyItem['client_email'] ?? ''),
+                ], $search);
+            }));
+            $unassigned = array_values(array_filter($unassigned, function (array $item) use ($search): bool {
+                return $this->matchesSearchTerm([
+                    (string) ($item['service_id'] ?? ''),
+                    (string) ($item['server_id'] ?? ''),
+                    (string) ($item['order_id'] ?? ''),
+                    (string) ($item['ip'] ?? ''),
+                    (string) ($item['ilo_ip'] ?? ''),
+                    (string) ($item['label'] ?? ''),
+                    (string) ($item['status'] ?? ''),
+                    (string) ($item['client_name'] ?? ''),
+                    (string) ($item['client_email'] ?? ''),
+                ], $search);
+            }));
+        }
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_tab_title')) . '</h3>';
@@ -633,22 +709,24 @@ final class AdminController
                 echo '<div class="alert alert-warning">' . htmlspecialchars($this->t('servers_api_empty_hint')) . '</div>';
             }
         }
+        echo '<form method="get" class="edbw-form-inline edbw-search-form" action="' . htmlspecialchars($this->buildTabUrl('servers', ['servers_q' => '', 'traffic_q' => '', 'focus_serviceid' => ''])) . '">';
+        echo '<label>' . htmlspecialchars($this->t('search')) . '</label>';
+        echo '<input type="text" name="servers_q" value="' . htmlspecialchars($search) . '" placeholder="' . htmlspecialchars($this->t('servers_search_placeholder')) . '">';
+        echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('search')) . '</button>';
+        if ($search !== '') {
+            echo '<a class="btn btn-default" href="' . htmlspecialchars($this->buildTabUrl('servers', ['servers_q' => '', 'traffic_q' => '', 'focus_serviceid' => ''])) . '">' . htmlspecialchars($this->t('clear_search')) . '</a>';
+        }
+        echo '</form>';
         echo '</div>';
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('servers_assigned')) . '</h3>';
         echo '<p class="edbw-help">' . htmlspecialchars($this->t('servers_traffic_hint')) . '</p>';
-        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>' . htmlspecialchars($this->t('traffic_used_gb')) . '</th><th>' . htmlspecialchars($this->t('traffic_remaining_gb')) . '</th><th>' . htmlspecialchars($this->t('traffic_allowed_gb')) . '</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('details')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
+        echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>' . htmlspecialchars($this->t('service')) . '</th><th>' . htmlspecialchars($this->t('client')) . '</th><th>' . htmlspecialchars($this->t('connected_switches')) . '</th><th>' . htmlspecialchars($this->t('ports_status')) . '</th><th>' . htmlspecialchars($this->t('status')) . '</th><th>' . htmlspecialchars($this->t('details')) . '</th><th>' . htmlspecialchars($this->t('test')) . '</th></tr></thead><tbody>';
         foreach ($services as $svc) {
             $testCache = $this->getServiceTestCache((int) $svc['serviceid']);
             $portsHtml = $this->renderPortStatusHtml($svc, $testCache);
-            $used = max(0.0, (float) ($svc['last_used_gb'] ?? 0.0));
-            $remaining = max(0.0, (float) ($svc['last_remaining_gb'] ?? 0.0));
-            $allowed = max(0.0, $used + $remaining);
             $lastCheck = trim((string) ($svc['last_check_at'] ?? ''));
-            $usedText = number_format($used, 2, '.', '');
-            $remainingText = number_format($remaining, 2, '.', '');
-            $allowedText = number_format($allowed, 2, '.', '');
             $cycleStart = trim((string) ($svc['cycle_start'] ?? ''));
             $cycleEnd = trim((string) ($svc['cycle_end'] ?? ''));
             $cycleText = ($cycleStart !== '' && $cycleEnd !== '')
@@ -701,12 +779,14 @@ final class AdminController
                 $detailHtml .= '<dt>' . htmlspecialchars((string) $label) . '</dt><dd>' . htmlspecialchars((string) $value) . '</dd>';
             }
             $detailHtml .= '</dl></details>';
+            $trafficUrl = $this->buildTabUrl('traffic', [
+                'traffic_q' => (string) ((int) ($svc['serviceid'] ?? 0)),
+                'focus_serviceid' => (string) ((int) ($svc['serviceid'] ?? 0)),
+            ]);
             echo '<tr>';
-            echo '<td><a href="' . htmlspecialchars((string) $svc['service_url']) . '">#' . (int) $svc['serviceid'] . '</a></td>';
+            echo '<td><a href="' . htmlspecialchars($trafficUrl) . '">#' . (int) $svc['serviceid'] . '</a></td>';
             echo '<td>' . $clientHtml . '</td>';
-            echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($usedText) . '</span></td>';
-            echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($remainingText) . '</span></td>';
-            echo '<td><span class="edbw-traffic-num">' . htmlspecialchars($allowedText) . '</span></td>';
+            echo '<td>' . htmlspecialchars($switchLabelText) . '</td>';
             echo '<td>' . $portsHtml . '</td>';
             echo '<td>' . htmlspecialchars($this->domainStatusLabel((string) ($svc['domainstatus'] ?? ''))) . '</td>';
             echo '<td>' . $detailHtml . '</td>';
@@ -714,7 +794,7 @@ final class AdminController
             echo '</tr>';
         }
         if (empty($services)) {
-            echo '<tr><td colspan="9">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
+            echo '<tr><td colspan="7">' . htmlspecialchars($this->t('no_rows')) . '</td></tr>';
         }
         echo '</tbody></table></div>';
         echo '</div>';
@@ -793,6 +873,60 @@ final class AdminController
         $query['action'] = 'test_all_services';
         $query['auto'] = '1';
         return $path . '?' . http_build_query($query);
+    }
+
+    private function buildTabUrl(string $tab, array $extra = []): string
+    {
+        $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+        if ($uri === '') {
+            return '?tab=' . rawurlencode($tab);
+        }
+        $parts = parse_url($uri);
+        $path = (string) ($parts['path'] ?? '');
+        if ($path === '') {
+            $path = 'addonmodules.php';
+        }
+        $query = [];
+        if (!empty($parts['query'])) {
+            parse_str((string) $parts['query'], $query);
+        }
+        unset($query['action'], $query['api'], $query['op'], $query['ajax'], $query['auto'], $query['tab']);
+        $query['tab'] = $tab;
+        foreach ($extra as $k => $v) {
+            if ($v === '' || $v === null) {
+                unset($query[$k]);
+                continue;
+            }
+            $query[(string) $k] = (string) $v;
+        }
+        return $path . '?' . http_build_query($query);
+    }
+
+    private function matchesSearchTerm(array $values, string $term): bool
+    {
+        $needle = $this->normalizeSearchText($term);
+        if ($needle === '') {
+            return true;
+        }
+        foreach ($values as $value) {
+            $haystack = $this->normalizeSearchText((string) $value);
+            if ($haystack !== '' && strpos($haystack, $needle) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function normalizeSearchText(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($value, 'UTF-8');
+        }
+        return strtolower($value);
     }
 
     private function getExplicitMappedEasyServiceIdsForScope(): array
@@ -1049,6 +1183,8 @@ final class AdminController
 
     private function renderTrafficTab(): void
     {
+        $search = trim((string) ($_REQUEST['traffic_q'] ?? ''));
+        $focusServiceId = (int) ($_REQUEST['focus_serviceid'] ?? 0);
         $q = Capsule::table('mod_easydcim_bw_guard_service_state as s')
             ->join('tblhosting as h', 'h.id', '=', 's.serviceid')
             ->leftJoin('tblclients as c', 'c.id', '=', 'h.userid')
@@ -1058,6 +1194,11 @@ final class AdminController
                 's.userid',
                 'h.packageid as pid',
                 'h.dedicatedip',
+                'h.domain',
+                'c.email',
+                's.easydcim_service_id',
+                's.easydcim_order_id',
+                's.easydcim_server_id',
                 's.last_used_gb',
                 's.last_remaining_gb',
                 's.last_status',
@@ -1087,9 +1228,70 @@ final class AdminController
                 $defaultsByPid[(int) $dr->pid] = $dr;
             }
         }
+        $easyServices = $this->getEasyServicesCacheOnly();
+        $easyByService = [];
+        $easyByOrder = [];
+        $easyByServer = [];
+        foreach ($easyServices as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $sid = trim((string) ($item['service_id'] ?? ''));
+            $ord = trim((string) ($item['order_id'] ?? ''));
+            $srv = trim((string) ($item['server_id'] ?? ''));
+            if ($sid !== '' && !isset($easyByService[$sid])) {
+                $easyByService[$sid] = $item;
+            }
+            if ($ord !== '' && !isset($easyByOrder[$ord])) {
+                $easyByOrder[$ord] = $item;
+            }
+            if ($srv !== '' && !isset($easyByServer[$srv])) {
+                $easyByServer[$srv] = $item;
+            }
+        }
+        if ($search !== '') {
+            $rows = $rows->filter(function ($row) use ($search, $easyByService, $easyByOrder, $easyByServer): bool {
+                $serviceId = trim((string) ($row->easydcim_service_id ?? ''));
+                $orderId = trim((string) ($row->easydcim_order_id ?? ''));
+                $serverId = trim((string) ($row->easydcim_server_id ?? ''));
+                $easyItem = $serviceId !== '' && isset($easyByService[$serviceId]) ? $easyByService[$serviceId] : [];
+                if (empty($easyItem) && $orderId !== '' && isset($easyByOrder[$orderId])) {
+                    $easyItem = $easyByOrder[$orderId];
+                }
+                if (empty($easyItem) && $serverId !== '' && isset($easyByServer[$serverId])) {
+                    $easyItem = $easyByServer[$serverId];
+                }
+                return $this->matchesSearchTerm([
+                    (string) ($row->serviceid ?? ''),
+                    (string) ($row->userid ?? ''),
+                    (string) ($row->pid ?? ''),
+                    (string) ($row->dedicatedip ?? ''),
+                    (string) ($row->domain ?? ''),
+                    (string) ($row->firstname ?? ''),
+                    (string) ($row->lastname ?? ''),
+                    (string) ($row->email ?? ''),
+                    (string) ($row->easydcim_service_id ?? ''),
+                    (string) ($row->easydcim_order_id ?? ''),
+                    (string) ($row->easydcim_server_id ?? ''),
+                    (string) ($easyItem['label'] ?? ''),
+                    (string) ($easyItem['ilo_ip'] ?? ''),
+                    (string) ($easyItem['ip'] ?? ''),
+                    (string) ($easyItem['client_name'] ?? ''),
+                    (string) ($easyItem['client_email'] ?? ''),
+                ], $search);
+            });
+        }
 
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('traffic_report_title')) . '</h3>';
+        echo '<form method="get" class="edbw-form-inline edbw-search-form" action="' . htmlspecialchars($this->buildTabUrl('traffic', ['traffic_q' => '', 'focus_serviceid' => '', 'servers_q' => ''])) . '">';
+        echo '<label>' . htmlspecialchars($this->t('search')) . '</label>';
+        echo '<input type="text" name="traffic_q" value="' . htmlspecialchars($search) . '" placeholder="' . htmlspecialchars($this->t('traffic_search_placeholder')) . '">';
+        echo '<button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('search')) . '</button>';
+        if ($search !== '' || $focusServiceId > 0) {
+            echo '<a class="btn btn-default" href="' . htmlspecialchars($this->buildTabUrl('traffic', ['traffic_q' => '', 'focus_serviceid' => '', 'servers_q' => ''])) . '">' . htmlspecialchars($this->t('clear_search')) . '</a>';
+        }
+        echo '</form>';
         echo '<div class="edbw-table-wrap"><table class="table table-striped edbw-table-center"><thead><tr><th>'
             . htmlspecialchars($this->t('service')) . '</th><th>'
             . htmlspecialchars($this->t('client')) . '</th><th>'
@@ -1135,7 +1337,8 @@ final class AdminController
             $defaultPlanHtml = $this->formatDefaultPlanBwBadge($defaultsByPid[$pid] ?? null, $mode);
             $resetAt = $cycleEnd !== '' ? (date('Y-m-d H:i:s', strtotime($cycleEnd) + 1)) : $this->t('m_no_data');
 
-            echo '<tr>';
+            $trClass = $focusServiceId > 0 && $focusServiceId === $serviceId ? ' class="edbw-row-focus"' : '';
+            echo '<tr' . $trClass . '>';
             echo '<td><a href="clientsservices.php?userid=' . $userId . '&id=' . $serviceId . '">#' . $serviceId . '</a></td>';
             echo '<td><a href="clientssummary.php?userid=' . $userId . '">' . htmlspecialchars($clientName) . '</a></td>';
             echo '<td>' . $defaultPlanHtml . '</td>';
@@ -5048,8 +5251,12 @@ final class AdminController
             'servers_api_loaded' => 'تعداد آیتم دریافتی از EasyDCIM',
             'servers_api_empty_hint' => 'لیست API خالی است. اگر توکن ادمین استفاده می‌کنید، حالت Unrestricted را روشن کنید یا Service/Order/Server ID را در سرویس‌های WHMCS تکمیل کنید.',
             'servers_assigned' => 'سرویس‌های واگذار شده به مشتری',
-            'servers_traffic_hint' => 'این جدول برای مانیتور پهنای‌باند است. برای گزارش کامل مصرف، تب «ترافیک» را هم بررسی کنید.',
+            'servers_traffic_hint' => 'نمایش سریع سوییچ، پورت و وضعیت سرویس. برای گزارش مصرف کامل روی شماره سرویس کلیک کنید یا تب «ترافیک» را باز کنید.',
             'servers_unassigned' => 'سرویس‌های آزاد (بدون اتصال به WHMCS)',
+            'search' => 'جستجو',
+            'clear_search' => 'پاک کردن',
+            'servers_search_placeholder' => 'جستجو: IP, iLO, Label/MDP, نام، ایمیل، Service/Order/Server ID',
+            'traffic_search_placeholder' => 'جستجو: IP, iLO, Label/MDP, نام، ایمیل، Service/Order/Server ID',
             'test' => 'تست',
             'mode' => 'روش',
             'invalid_service' => 'شناسه سرویس نامعتبر است.',
@@ -5272,8 +5479,12 @@ final class AdminController
             'servers_api_loaded' => 'Items loaded from EasyDCIM',
             'servers_api_empty_hint' => 'API list is empty. If you use an admin token, enable Unrestricted mode or fill Service/Order/Server IDs on WHMCS services.',
             'servers_assigned' => 'Assigned Services (WHMCS mapped)',
-            'servers_traffic_hint' => 'This view is bandwidth-focused. For full usage history, open the Traffic tab.',
+            'servers_traffic_hint' => 'Quick view of switch, ports, and status. Click a service ID for full traffic history in the Traffic tab.',
             'servers_unassigned' => 'Unassigned Services (not mapped to WHMCS)',
+            'search' => 'Search',
+            'clear_search' => 'Clear',
+            'servers_search_placeholder' => 'Search by IP, iLO, Label/MDP, name, email, Service/Order/Server ID',
+            'traffic_search_placeholder' => 'Search by IP, iLO, Label/MDP, name, email, Service/Order/Server ID',
             'test' => 'Test',
             'mode' => 'Mode',
             'invalid_service' => 'Invalid service id.',

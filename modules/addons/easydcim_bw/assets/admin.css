@@ -335,6 +335,11 @@
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
 }
 
+.edbw-dot-gray {
+  background: #94a3b8;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+}
+
 .edbw-port-name {
   font-weight: 600;
   max-width: 360px;

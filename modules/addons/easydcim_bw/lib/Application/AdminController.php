@@ -4703,8 +4703,8 @@ final class AdminController
                 $stateHint = strtolower(trim((string) ($r['state'] ?? '')));
                 $isUp = !empty($r['is_up']) || in_array($stateHint, ['up', 'idle', 'enabled', 'online', 'connected'], true);
                 $traffic = (float) ($r['traffic_total'] ?? 0.0);
-                $stateClass = 'edbw-dot-yellow';
-                $stateText = $this->isFa ? 'نامشخص' : 'Unknown';
+                $stateClass = 'edbw-dot-gray';
+                $stateText = $this->isFa ? 'بدون وضعیت لینک' : 'No link data';
                 if ($stateHint === 'down') {
                     $stateClass = 'edbw-dot-red';
                     $stateText = $this->isFa ? 'قطع' : 'Down';
@@ -4767,10 +4767,12 @@ final class AdminController
                 ? ($nameInterface . ' @ ' . $connectedItem)
                 : $nameInterface;
         }
-
-        $descriptive = $this->pickDescriptivePortLabel([$connected, $name, $connectedItem], '');
-        if ($descriptive !== '') {
-            return $descriptive;
+        // If interface name is missing, show stable numeric IDs instead of vague labels.
+        if ($connectedId !== '') {
+            return '#' . $connectedId;
+        }
+        if ($portId !== '') {
+            return '#' . $portId;
         }
 
         if ($connected !== '' && !$this->isSimpleNumericLabel($connected)) {

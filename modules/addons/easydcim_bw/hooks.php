@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use EasyDcimBandwidthGuard\Application\AdminController;
 use EasyDcimBandwidthGuard\Application\CronRunner;
 use EasyDcimBandwidthGuard\Autoloader;
 use EasyDcimBandwidthGuard\Config\Settings;
@@ -54,6 +55,12 @@ add_hook('AfterCronJob', 1, static function (): void {
     }
 
     $runner->runUpdateCheck(__DIR__);
+
+    try {
+        (new AdminController($settings, new Logger(), __DIR__))->processQueuedServerTestsFromCron(5);
+    } catch (\Throwable $e) {
+        (new Logger())->log('ERROR', 'servers_test_all_background_hook_failed', ['error' => $e->getMessage()]);
+    }
 });
 
 add_hook('AdminServicesTabFields', 1, static function (array $vars): array {

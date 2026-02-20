@@ -2,6 +2,14 @@
 
 All notable changes for EasyDcim-BW are documented here.
 
+## [1.96] - 2026-02-20
+### Added
+- `Test All` server queue now continues in background via WHMCS cron even if admin leaves the Servers tab.
+- Each cron run processes the pending queue in chunks and logs progress until completion.
+
+### Fixed
+- Batch runner no longer requires keeping the page open to continue service-by-service testing.
+
 ## [1.95] - 2026-02-20
 ### Added
 - Traffic tab now shows **Default Plan BW** in compact format (`D | U | T`) with mode-based highlighting.

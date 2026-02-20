@@ -3216,13 +3216,32 @@ final class AdminController
         return $updated;
     }
 
-    private function testAllServices(): array
+    public function processQueuedServerTestsFromCron(int $chunkSize = 5): void
+    {
+        try {
+            $state = $this->getTestAllState();
+            if (empty($state['queue']) || (int) ($state['remaining'] ?? 0) <= 0) {
+                return;
+            }
+            $result = $this->testAllServices(max(1, $chunkSize), false);
+            if (!empty($result['text'])) {
+                $this->logger->log('INFO', 'servers_test_all_background_tick', [
+                    'message' => (string) $result['text'],
+                    'remaining' => (int) ($this->getTestAllState()['remaining'] ?? 0),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->log('ERROR', 'servers_test_all_background_failed', ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function testAllServices(?int $chunkOverride = null, bool $allowInitialize = true): array
     {
         try {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(60);
             }
-            $chunkSize = 1;
+            $chunkSize = max(1, (int) ($chunkOverride ?? 1));
             $state = $this->getTestAllState();
             $queue = $state['queue'];
 
@@ -3231,6 +3250,10 @@ final class AdminController
                 $queue = $this->rebuildTestQueueFromProgress((int) ($state['done'] ?? 0));
                 $state['queue'] = $queue;
                 $state['remaining'] = count($queue);
+            }
+
+            if (empty($queue) && !$allowInitialize) {
+                return ['type' => 'info', 'silent' => true, 'text' => ''];
             }
 
             if (empty($queue)) {

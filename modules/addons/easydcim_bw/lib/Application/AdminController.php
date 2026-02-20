@@ -313,6 +313,8 @@ final class AdminController
         $updateLock = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'update_in_progress')->value('meta_value') === '1';
         $releaseTag = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_latest_tag')->value('meta_value');
         $releaseAvailable = Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_update_available')->value('meta_value') === '1';
+        $releaseSourceStateRaw = (string) Capsule::table('mod_easydcim_bw_guard_meta')->where('meta_key', 'release_source_status')->value('meta_value');
+        $releaseSourceState = $releaseSourceStateRaw === 'ok' ? 'ok' : ($releaseSourceStateRaw === 'error' ? 'error' : 'neutral');
         $releaseVersion = ltrim($releaseTag, 'vV');
         if ($releaseTag !== '' && $this->compareVersion($releaseVersion, (string) $version['module_version']) <= 0) {
             $releaseAvailable = false;
@@ -321,7 +323,12 @@ final class AdminController
 
         echo '<div class="edbw-metrics">';
         $this->renderMetricCard($this->t('m_version'), (string) $version['module_version'], 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4z"></path></svg>');
-        $this->renderMetricCard($this->t('m_commit'), (string) $version['commit_sha'], 'neutral', '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>');
+        $this->renderMetricCard(
+            $this->t('m_update_source'),
+            $this->t('m_update_source_github'),
+            $releaseSourceState,
+            '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h1a4 4 0 014 4v5h-2v-5a2 2 0 00-2-2h-1v2a5 5 0 11-10 0v-2H6a2 2 0 00-2 2v5H2v-5a4 4 0 014-4h1V7a5 5 0 015-5z"></path></svg>'
+        );
         $this->renderMetricCard($this->t('m_update_status'), $releaseAvailable ? $this->t('m_update_available') : $this->t('m_uptodate'), $releaseAvailable ? 'warn' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 4v8m0 0l3-3m-3 3L9 9M5 14a7 7 0 1014 0"></path></svg>');
         $apiFailUrl = $this->buildTabUrl('logs', ['logs_only_errors' => '1', 'logs_level' => 'ERROR']);
         $this->renderMetricCardLink($this->t('m_api_fail_count'), (string) $apiFailCount, $apiFailCount > 0 ? 'error' : 'ok', '<svg viewBox="0 0 24 24"><path d="M12 3l9 18H3zM12 9v4m0 4h.01"></path></svg>', $apiFailUrl);
@@ -334,7 +341,7 @@ final class AdminController
         echo '<div class="edbw-panel">';
         echo '<h3>' . htmlspecialchars($this->t('update_actions')) . '</h3>';
         echo '<div class="edbw-actions">';
-        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="check_release_update"><button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('check_update_now')) . '</button></form>';
+        echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="check_release_update"><button class="btn btn-default" type="submit">' . htmlspecialchars($this->t('check_update_again')) . '</button></form>';
         echo '<form method="post" class="edbw-form-inline"><input type="hidden" name="tab" value="dashboard"><input type="hidden" name="action" value="apply_release_update"><button class="btn btn-primary" type="submit">' . htmlspecialchars($this->t('apply_latest_release')) . '</button></form>';
         echo '</div>';
         echo '</div>';
@@ -2512,6 +2519,10 @@ final class AdminController
                 ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
             );
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_source_status'],
+                ['meta_value' => 'ok', 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
                 ['meta_key' => 'release_last_auto_check_at'],
                 ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
             );
@@ -2519,6 +2530,10 @@ final class AdminController
             Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
                 ['meta_key' => 'release_last_auto_check_at'],
                 ['meta_value' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]
+            );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_source_status'],
+                ['meta_value' => 'error', 'updated_at' => date('Y-m-d H:i:s')]
             );
             $this->logger->log('WARNING', 'release_auto_refresh_failed', ['error' => $e->getMessage()]);
         }
@@ -2646,9 +2661,17 @@ final class AdminController
                 ['meta_key' => 'release_update_available'],
                 ['meta_value' => $available ? '1' : '0', 'updated_at' => date('Y-m-d H:i:s')]
             );
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_source_status'],
+                ['meta_value' => 'ok', 'updated_at' => date('Y-m-d H:i:s')]
+            );
 
             return ['type' => 'success', 'text' => $available ? ('New release found: ' . $latestTag) : 'No newer release found.'];
         } catch (\Throwable $e) {
+            Capsule::table('mod_easydcim_bw_guard_meta')->updateOrInsert(
+                ['meta_key' => 'release_source_status'],
+                ['meta_value' => 'error', 'updated_at' => date('Y-m-d H:i:s')]
+            );
             return ['type' => 'danger', 'text' => 'Release check failed: ' . $e->getMessage()];
         }
     }
@@ -5423,6 +5446,8 @@ final class AdminController
             'warn_easy_cache_empty_text' => 'ابتدا از تب Servers گزینه Refresh Cache را اجرا کنید تا اختلاف‌ها و سرویس‌های آزاد قابل تحلیل شوند.',
             'm_version' => 'نسخه',
             'm_commit' => 'کامیت',
+            'm_update_source' => 'آپدیت سورس',
+            'm_update_source_github' => 'گیت هاب',
             'm_update_status' => 'وضعیت آپدیت',
             'm_release_status' => 'وضعیت ریلیز',
             'm_cron_poll' => 'آخرین Poll',
@@ -5443,6 +5468,7 @@ final class AdminController
             'm_unknown' => 'نامشخص',
             'update_actions' => 'اقدامات آپدیت',
             'check_update_now' => 'بررسی آپدیت',
+            'check_update_again' => 'چک کردن مجدد',
             'apply_latest_release' => 'اعمال آخرین ریلیز',
             'update_banner' => 'آپدیت جدید برای ماژول موجود است. لطفا از داشبورد اقدام کنید.',
             'release_apply_queued' => 'درخواست آپدیت ثبت شد و در اجرای بعدی کرون اعمال می‌شود.',
@@ -5653,6 +5679,8 @@ final class AdminController
             'warn_easy_cache_empty_text' => 'Run Refresh Cache in the Servers tab first so mismatches and unassigned services can be analyzed.',
             'm_version' => 'Version',
             'm_commit' => 'Commit',
+            'm_update_source' => 'Update Source',
+            'm_update_source_github' => 'GitHub',
             'm_update_status' => 'Update Status',
             'm_release_status' => 'Release Status',
             'm_cron_poll' => 'Cron Poll',
@@ -5673,6 +5701,7 @@ final class AdminController
             'm_unknown' => 'Unknown',
             'update_actions' => 'Update Actions',
             'check_update_now' => 'Check Update Now',
+            'check_update_again' => 'Check Again',
             'apply_latest_release' => 'Apply Latest Release',
             'update_banner' => 'A new module update is available. Please apply it from the dashboard.',
             'release_apply_queued' => 'Update request queued. It will be applied on the next cron run.',
